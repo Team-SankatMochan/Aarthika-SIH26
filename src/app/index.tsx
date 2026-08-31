@@ -5,7 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Platform
+  Platform,
+  ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { database } from '../../model';
@@ -14,6 +16,7 @@ import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { Spacing } from '@/constants/theme';
+import { TIER_BADGES } from '@/constants/icons';
 
 export default function InputScreen() {
   const router = useRouter();
@@ -26,6 +29,7 @@ export default function InputScreen() {
   const [showBusinessPicker, setShowBusinessPicker] = useState(false);
   const [citySearch, setCitySearch] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const selectedCity = CITY_LIST.find(c => c.key === selectedCityKey);
   const selectedBusiness = BUSINESS_TYPE_LIST.find(b => b.key === selectedBusinessKey);
@@ -35,23 +39,29 @@ export default function InputScreen() {
     c.state.toLowerCase().includes(citySearch.toLowerCase())
   );
 
+  // Validation helpers
+  const capitalNum = parseFloat(capital);
+  const isCapitalValid = capital.length > 0 && !isNaN(capitalNum) && capitalNum > 0;
+  const isCityValid = selectedCityKey.length > 0;
+  const isBusinessValid = selectedBusinessKey.length > 0;
+
   async function handleSubmit() {
     setError('');
 
-    const capitalNum = parseFloat(capital);
-    if (!capital || isNaN(capitalNum) || capitalNum <= 0) {
+    if (!isCapitalValid) {
       setError('Please enter a valid margin capital amount');
       return;
     }
-    if (!selectedCityKey) {
+    if (!isCityValid) {
       setError('Please select your city/location');
       return;
     }
-    if (!selectedBusinessKey) {
+    if (!isBusinessValid) {
       setError('Please select your business type');
       return;
     }
 
+    setLoading(true);
     try {
       let newProfile: any;
       await database.write(async () => {
@@ -64,10 +74,15 @@ export default function InputScreen() {
           p.tier = selectedCity?.tier ?? '';
         });
       });
-      router.push({ pathname: '/dashboard', params: { profileId: newProfile.id } });
+
+      // Small delay for better UX
+      setTimeout(() => {
+        router.push({ pathname: '/dashboard', params: { profileId: newProfile.id } });
+      }, 300);
     } catch (err) {
       setError('Failed to save profile. Please try again.');
       console.error(err);
+      setLoading(false);
     }
   }
 
@@ -89,16 +104,22 @@ export default function InputScreen() {
 
         {/* Margin Capital Input */}
         <View style={styles.inputGroup}>
-          <ThemedText type="smallBold" style={styles.label}>
-            Margin Capital (₹)
-          </ThemedText>
+          <View style={styles.labelRow}>
+            <ThemedText type="smallBold" style={styles.label}>
+              Margin Capital (₹)
+            </ThemedText>
+            {isCapitalValid && (
+              <ThemedText style={styles.validCheck}>✓</ThemedText>
+            )}
+          </View>
           <TextInput
             style={[
               styles.input,
               {
                 color: theme.text,
                 backgroundColor: theme.backgroundElement,
-                borderColor: theme.backgroundSelected,
+                borderColor: isCapitalValid ? '#639922' : theme.backgroundSelected,
+                borderWidth: isCapitalValid ? 2 : 1,
               }
             ]}
             placeholder="Enter amount"
@@ -106,27 +127,44 @@ export default function InputScreen() {
             keyboardType="numeric"
             value={capital}
             onChangeText={setCapital}
+            editable={!loading}
           />
         </View>
 
         {/* City Picker */}
         <View style={styles.inputGroup}>
-          <ThemedText type="smallBold" style={styles.label}>
-            Location / City
-          </ThemedText>
+          <View style={styles.labelRow}>
+            <ThemedText type="smallBold" style={styles.label}>
+              Location / City
+            </ThemedText>
+            {isCityValid && (
+              <ThemedText style={styles.validCheck}>✓</ThemedText>
+            )}
+          </View>
           <Pressable
-            onPress={() => setShowCityPicker(!showCityPicker)}
+            onPress={() => !loading && setShowCityPicker(!showCityPicker)}
             style={[
               styles.picker,
               {
                 backgroundColor: theme.backgroundElement,
-                borderColor: theme.backgroundSelected,
+                borderColor: isCityValid ? '#639922' : theme.backgroundSelected,
+                borderWidth: isCityValid ? 2 : 1,
               }
             ]}
+            disabled={loading}
           >
-            <ThemedText themeColor={selectedCity ? 'text' : 'textSecondary'}>
-              {selectedCity ? `${selectedCity.name}, ${selectedCity.state}` : 'Select city'}
-            </ThemedText>
+            <View style={styles.pickerContent}>
+              <ThemedText themeColor={selectedCity ? 'text' : 'textSecondary'}>
+                {selectedCity ? `${selectedCity.name}, ${selectedCity.state}` : 'Select city'}
+              </ThemedText>
+              {selectedCity && (
+                <View style={[styles.miniTierBadge, { backgroundColor: TIER_BADGES[selectedCity.tier].color + '20' }]}>
+                  <ThemedText type="small" style={[styles.miniTierText, { color: TIER_BADGES[selectedCity.tier].color }]}>
+                    {TIER_BADGES[selectedCity.tier].icon}
+                  </ThemedText>
+                </View>
+              )}
+            </View>
           </Pressable>
 
           {showCityPicker && (
@@ -172,22 +210,38 @@ export default function InputScreen() {
 
         {/* Business Type Picker */}
         <View style={styles.inputGroup}>
-          <ThemedText type="smallBold" style={styles.label}>
-            Business Type
-          </ThemedText>
+          <View style={styles.labelRow}>
+            <ThemedText type="smallBold" style={styles.label}>
+              Business Type
+            </ThemedText>
+            {isBusinessValid && (
+              <ThemedText style={styles.validCheck}>✓</ThemedText>
+            )}
+          </View>
           <Pressable
-            onPress={() => setShowBusinessPicker(!showBusinessPicker)}
+            onPress={() => !loading && setShowBusinessPicker(!showBusinessPicker)}
             style={[
               styles.picker,
               {
                 backgroundColor: theme.backgroundElement,
-                borderColor: theme.backgroundSelected,
+                borderColor: isBusinessValid ? '#639922' : theme.backgroundSelected,
+                borderWidth: isBusinessValid ? 2 : 1,
               }
             ]}
+            disabled={loading}
           >
-            <ThemedText themeColor={selectedBusiness ? 'text' : 'textSecondary'}>
-              {selectedBusiness ? selectedBusiness.label : 'Select business type'}
-            </ThemedText>
+            <View style={styles.pickerContent}>
+              <ThemedText themeColor={selectedBusiness ? 'text' : 'textSecondary'}>
+                {selectedBusiness ? selectedBusiness.label : 'Select business type'}
+              </ThemedText>
+              {selectedBusiness && (
+                <View style={styles.miniMarginBadge}>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {(selectedBusiness.marginPercent * 100).toFixed(0)}%
+                  </ThemedText>
+                </View>
+              )}
+            </View>
           </Pressable>
 
           {showBusinessPicker && (
@@ -231,11 +285,22 @@ export default function InputScreen() {
           style={({ pressed }) => [
             styles.submitButton,
             pressed && styles.submitButtonPressed,
+            loading && styles.submitButtonDisabled,
           ]}
+          disabled={loading}
         >
-          <ThemedText type="smallBold" style={styles.submitText}>
-            Calculate Financial Plan
-          </ThemedText>
+          {loading ? (
+            <View style={styles.submitLoading}>
+              <ActivityIndicator size="small" color="#FFF" />
+              <ThemedText type="smallBold" style={styles.submitText}>
+                Saving...
+              </ThemedText>
+            </View>
+          ) : (
+            <ThemedText type="smallBold" style={styles.submitText}>
+              Calculate Financial Plan
+            </ThemedText>
+          )}
         </Pressable>
 
         <View style={styles.footer}>
@@ -272,22 +337,50 @@ const styles = StyleSheet.create({
   inputGroup: {
     marginBottom: Spacing.four,
   },
-  label: {
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: Spacing.two,
+  },
+  label: {
+    marginBottom: 0,
+  },
+  validCheck: {
+    fontSize: 18,
+    color: '#639922',
+    fontWeight: 'bold',
   },
   input: {
     height: 56,
     borderRadius: 12,
-    borderWidth: 1,
     paddingHorizontal: Spacing.four,
     fontSize: 16,
   },
   picker: {
     height: 56,
     borderRadius: 12,
-    borderWidth: 1,
     paddingHorizontal: Spacing.four,
     justifyContent: 'center',
+  },
+  pickerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  miniTierBadge: {
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  miniTierText: {
+    fontSize: 14,
+  },
+  miniMarginBadge: {
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#639922' + '20',
   },
   dropdown: {
     marginTop: Spacing.two,
@@ -349,6 +442,14 @@ const styles = StyleSheet.create({
   },
   submitButtonPressed: {
     opacity: 0.8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  submitLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   submitText: {
     color: '#FFF',
