@@ -1,11 +1,11 @@
 import { Model } from '@nozbe/watermelondb';
-import { field } from '@nozbe/watermelondb/decorators';
+import { field, date } from '@nozbe/watermelondb/decorators';
 
 export default class Interaction extends Model {
     static table = 'interactions';
 
     @field('profile_id') profileId!: string;
     @field('slider_name') sliderName!: string;
-    @field('moved_count') movedCount!: number;
+    @field('slider_value') sliderValue!: number;
+    @date('timestamp') timestamp!: number;
 }
-

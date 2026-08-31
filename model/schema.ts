@@ -1,4 +1,5 @@
 import { tableSchema, appSchema } from '@nozbe/watermelondb';
+
 export default appSchema({
     version: 1,
     tables: [
@@ -6,8 +7,11 @@ export default appSchema({
             name: 'profiles',
             columns: [
                 { name: 'capital', type: 'number' },
-                { name: 'location', type: 'string' },
-                { name: 'business_type', type: 'string' },
+                { name: 'city_key', type: 'string' },
+                { name: 'business_type_key', type: 'string' },
+                { name: 'city_name', type: 'string' },
+                { name: 'business_label', type: 'string' },
+                { name: 'tier', type: 'string' },
                 { name: 'created_at', type: 'number' },
             ],
         }),
@@ -17,7 +21,8 @@ export default appSchema({
             columns: [
                 { name: 'profile_id', type: 'string', isIndexed: true },
                 { name: 'slider_name', type: 'string' },
-                { name: 'moved_count', type: 'number' },
+                { name: 'slider_value', type: 'number' },
+                { name: 'timestamp', type: 'number' },
             ],
         }),
     ],
