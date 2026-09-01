@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: arthsetu_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arthsetu_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arthsetu_password}
+      POSTGRES_DB: ${POSTGRES_DB:-arthsetu_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arthsetu_user} -d ${POSTGRES_DB:-arthsetu_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: arthsetu_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-arthsetu_user}:${POSTGRES_PASSWORD:-arthsetu_password}@postgres:5432/${POSTGRES_DB:-arthsetu_db}
+      ENVIRONMENT: development
+      DEBUG: "True"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+
+volumes:
+  postgres_data:

@@ -63,9 +63,27 @@ export default function InputScreen() {
 
     setLoading(true);
     try {
-      let newProfile: any;
+      let newUser: any;
+      let newBusiness: any;
       await database.write(async () => {
-        newProfile = await database.get('profiles').create((p: any) => {
+        // Create User
+        newUser = await database.get('users').create((u: any) => {
+          u.name = `Entrepreneur ${Math.floor(Math.random() * 1000)}`; // Default name for now
+          u.locationId = selectedCityKey; // Using city key as a proxy for location_id for now
+          u.availableCapital = capitalNum;
+        });
+
+        // Create Business linked to user
+        newBusiness = await database.get('businesses').create((b: any) => {
+          b.userId = newUser.id;
+          b.locationId = selectedCityKey;
+          b.businessName = `My ${selectedBusiness?.label ?? 'Business'}`;
+          b.businessCategory = selectedBusinessKey;
+          b.status = 'planning';
+        });
+
+        // For backward compatibility until Dashboard works with new models
+        await database.get('profiles').create((p: any) => {
           p.capital = capitalNum;
           p.cityKey = selectedCityKey;
           p.businessTypeKey = selectedBusinessKey;
@@ -77,7 +95,11 @@ export default function InputScreen() {
 
       // Small delay for better UX
       setTimeout(() => {
-        router.push({ pathname: '/dashboard', params: { profileId: newProfile.id } });
+        // Pass businessId for new flow, profileId for backward compatibility
+        router.push({
+          pathname: '/dashboard',
+          params: { profileId: newBusiness.id } // Still passing as profileId to not break dashboard
+        });
       }, 300);
     } catch (err) {
       setError('Failed to save profile. Please try again.');

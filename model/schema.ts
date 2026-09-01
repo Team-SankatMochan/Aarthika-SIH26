@@ -1,8 +1,258 @@
-import { tableSchema, appSchema } from '@nozbe/watermelondb';
+import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export default appSchema({
-    version: 1,
+    version: 2,
     tables: [
+        // ─── Core Entities ─────────────────────────────────────────
+
+        tableSchema({
+            name: 'locations',
+            columns: [
+                { name: 'state', type: 'string' },
+                { name: 'district', type: 'string', isOptional: true },
+                { name: 'block', type: 'string', isOptional: true },
+                { name: 'village_or_city', type: 'string', isOptional: true },
+                { name: 'latitude', type: 'number', isOptional: true },
+                { name: 'longitude', type: 'number', isOptional: true },
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'users',
+            columns: [
+                { name: 'name', type: 'string' },
+                { name: 'phone', type: 'string', isOptional: true },
+                { name: 'location_id', type: 'string', isIndexed: true },
+                { name: 'available_capital', type: 'number' },
+                { name: 'skills', type: 'string', isOptional: true }, // JSON string
+                { name: 'experience', type: 'string', isOptional: true },
+                { name: 'assets', type: 'string', isOptional: true }, // JSON string
+                { name: 'family_workforce', type: 'number', isOptional: true },
+                { name: 'preferences', type: 'string', isOptional: true }, // JSON string
+                { name: 'risk_tolerance', type: 'string', isOptional: true },
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'businesses',
+            columns: [
+                { name: 'user_id', type: 'string', isIndexed: true },
+                { name: 'location_id', type: 'string', isIndexed: true },
+                { name: 'business_name', type: 'string' },
+                { name: 'business_category', type: 'string' },
+                { name: 'description', type: 'string', isOptional: true },
+                { name: 'status', type: 'string' }, // planning, testing, validated, financed
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        // ─── Market & Financial Data ───────────────────────────────
+
+        tableSchema({
+            name: 'market_data',
+            columns: [
+                { name: 'location_id', type: 'string', isIndexed: true },
+                { name: 'business_id', type: 'string', isIndexed: true, isOptional: true },
+                { name: 'data_type', type: 'string' }, // demand, price, cost, competition
+                { name: 'source', type: 'string' },
+                { name: 'value', type: 'number' },
+                { name: 'unit', type: 'string', isOptional: true },
+                { name: 'observation_date', type: 'number' },
+                { name: 'confidence', type: 'number', isOptional: true },
+                { name: 'is_observed', type: 'boolean' },
+                { name: 'is_estimated', type: 'boolean' },
+                { name: 'metadata_json', type: 'string', isOptional: true }, // JSON string
+                { name: 'created_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'business_assumptions',
+            columns: [
+                { name: 'business_id', type: 'string', isIndexed: true },
+                { name: 'expected_customers', type: 'number' },
+                { name: 'selling_price', type: 'number' },
+                { name: 'production_volume', type: 'number' },
+                { name: 'raw_material_cost', type: 'number' },
+                { name: 'labour_cost', type: 'number' },
+                { name: 'rent', type: 'number' },
+                { name: 'transport_cost', type: 'number' },
+                { name: 'working_capital', type: 'number' },
+                { name: 'proposed_loan_amount', type: 'number' },
+                { name: 'other_operating_cost', type: 'number' },
+                { name: 'assumption_source', type: 'string' },
+                { name: 'confidence', type: 'number', isOptional: true },
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        // ─── Stress Testing & Validation ───────────────────────────
+
+        tableSchema({
+            name: 'stress_tests',
+            columns: [
+                { name: 'business_id', type: 'string', isIndexed: true },
+                { name: 'base_assumption_id', type: 'string', isIndexed: true },
+                { name: 'name', type: 'string' },
+                { name: 'description', type: 'string', isOptional: true },
+                { name: 'status', type: 'string' }, // pending, running, completed
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'stress_test_scenarios',
+            columns: [
+                { name: 'stress_test_id', type: 'string', isIndexed: true },
+                { name: 'scenario_type', type: 'string' }, // price_drop, cost_spike, demand_fall
+                { name: 'parameter_name', type: 'string' },
+                { name: 'change_percentage', type: 'number', isOptional: true },
+                { name: 'change_absolute', type: 'number', isOptional: true },
+                { name: 'revenue', type: 'number' },
+                { name: 'operating_cost', type: 'number' },
+                { name: 'cash_surplus', type: 'number' },
+                { name: 'debt_repayment_burden', type: 'number', isOptional: true },
+                { name: 'working_capital_pressure', type: 'number', isOptional: true },
+                { name: 'break_even', type: 'number', isOptional: true },
+                { name: 'resilience_score', type: 'number', isOptional: true },
+                { name: 'result_status', type: 'string' }, // viable, stressed, unviable
+                { name: 'created_at', type: 'number' },
+            ],
+        }),
+
+        // ─── Real-World Pilots ─────────────────────────────────────
+
+        tableSchema({
+            name: 'pilots',
+            columns: [
+                { name: 'business_id', type: 'string', isIndexed: true },
+                { name: 'objective', type: 'string' },
+                { name: 'hypothesis', type: 'string', isOptional: true },
+                { name: 'duration_days', type: 'number' },
+                { name: 'status', type: 'string' }, // planned, running, completed
+                { name: 'start_date', type: 'number', isOptional: true },
+                { name: 'end_date', type: 'number', isOptional: true },
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'pilot_results',
+            columns: [
+                { name: 'pilot_id', type: 'string', isIndexed: true },
+                { name: 'target_customers', type: 'number' },
+                { name: 'actual_customers', type: 'number' },
+                { name: 'repeat_purchase_rate', type: 'number', isOptional: true },
+                { name: 'price_acceptance', type: 'number', isOptional: true },
+                { name: 'delivery_cost', type: 'number', isOptional: true },
+                { name: 'conversion_rate', type: 'number', isOptional: true },
+                { name: 'actual_revenue', type: 'number' },
+                { name: 'actual_cost', type: 'number' },
+                { name: 'customer_feedback', type: 'string', isOptional: true },
+                { name: 'observations', type: 'string', isOptional: true },
+                { name: 'created_at', type: 'number' },
+            ],
+        }),
+
+        // ─── Financing & Schemes ───────────────────────────────────
+
+        tableSchema({
+            name: 'schemes',
+            columns: [
+                { name: 'scheme_name', type: 'string' },
+                { name: 'scheme_type', type: 'string' },
+                { name: 'description', type: 'string', isOptional: true },
+                { name: 'active', type: 'boolean' },
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'scheme_rules',
+            columns: [
+                { name: 'scheme_id', type: 'string', isIndexed: true },
+                { name: 'min_project_cost', type: 'number' },
+                { name: 'max_project_cost', type: 'number' },
+                { name: 'financing_percentage', type: 'number' },
+                { name: 'max_loan_amount', type: 'number' },
+                { name: 'annual_interest_rate', type: 'number' },
+                { name: 'tenure_months', type: 'number' },
+                { name: 'moratorium_months', type: 'number' },
+                { name: 'effective_from', type: 'number', isOptional: true },
+                { name: 'effective_to', type: 'number', isOptional: true },
+                { name: 'active', type: 'boolean' },
+                { name: 'created_at', type: 'number' },
+                { name: 'updated_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'finance_assessments',
+            columns: [
+                { name: 'business_id', type: 'string', isIndexed: true },
+                { name: 'scheme_id', type: 'string', isIndexed: true, isOptional: true },
+                { name: 'scheme_rule_id', type: 'string', isIndexed: true, isOptional: true },
+                { name: 'project_cost', type: 'number' },
+                { name: 'margin_contribution', type: 'number' },
+                { name: 'maximum_loan', type: 'number' },
+                { name: 'recommended_loan', type: 'number' },
+                { name: 'annual_interest_rate', type: 'number' },
+                { name: 'total_tenure_months', type: 'number' },
+                { name: 'moratorium_months', type: 'number' },
+                { name: 'active_repayment_months', type: 'number' },
+                { name: 'capitalized_principal', type: 'number' },
+                { name: 'emi', type: 'number' },
+                { name: 'total_interest', type: 'number' },
+                { name: 'debt_affordability_status', type: 'string' },
+                { name: 'debt_service_burden', type: 'number' },
+                { name: 'working_capital_requirement', type: 'number' },
+                { name: 'calculation_version', type: 'number' },
+                { name: 'created_at', type: 'number' },
+            ],
+        }),
+
+        // ─── Evidence & Decisions ──────────────────────────────────
+
+        tableSchema({
+            name: 'evidence',
+            columns: [
+                { name: 'business_id', type: 'string', isIndexed: true },
+                { name: 'evidence_type', type: 'string' }, // market, pilot, financial, customer
+                { name: 'source', type: 'string' },
+                { name: 'description', type: 'string' },
+                { name: 'value', type: 'number', isOptional: true },
+                { name: 'confidence', type: 'number', isOptional: true },
+                { name: 'is_observed', type: 'boolean' },
+                { name: 'is_estimated', type: 'boolean' },
+                { name: 'created_at', type: 'number' },
+            ],
+        }),
+
+        tableSchema({
+            name: 'decisions',
+            columns: [
+                { name: 'business_id', type: 'string', isIndexed: true },
+                { name: 'decision', type: 'string' }, // GO, MODIFY, DO_NOT_INVEST_YET
+                { name: 'rationale', type: 'string' },
+                { name: 'confidence', type: 'number' },
+                { name: 'evidence_summary', type: 'string', isOptional: true }, // JSON string
+                { name: 'assumptions_summary', type: 'string', isOptional: true }, // JSON string
+                { name: 'financial_risk_summary', type: 'string', isOptional: true }, // JSON string
+                { name: 'created_at', type: 'number' },
+            ],
+        }),
+
+        // ─── Legacy (for backward compatibility during migration) ───
+
         tableSchema({
             name: 'profiles',
             columns: [

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -12,6 +12,8 @@ import { withObservables } from '@nozbe/watermelondb/react';
 import { Q } from '@nozbe/watermelondb';
 import { database } from '../../model';
 import Profile from '../../model/profile';
+import Business from '../../model/Business';
+import User from '../../model/User';
 import {
   analyseProject,
   recalculateWithDisaster,
@@ -29,26 +31,50 @@ import { Spacing } from '@/constants/theme';
 import { BUSINESS_ICONS, TIER_BADGES } from '@/constants/icons';
 
 interface DashboardScreenProps {
-  profile: Profile;
+  business?: Business;
+  user?: User;
+  profile?: Profile; // fallback for legacy code
 }
 
-function DashboardScreen({ profile }: DashboardScreenProps) {
+function DashboardScreen({ business, user, profile }: DashboardScreenProps) {
   const theme = useTheme();
   const [disasterImpact, setDisasterImpact] = useState(0);
 
+  // Map backend models to math engine inputs
+  const projectInputs = useMemo(() => {
+    if (business && user) {
+      return {
+        marginCapital: user.availableCapital,
+        cityKey: business.locationId,
+        businessTypeKey: business.businessCategory,
+      };
+    } else if (profile) {
+      return profile.getProjectInputs();
+    }
+    return null;
+  }, [business, user, profile]);
+
+  const displayCapital = useMemo(() => {
+    if (user) return formatINR(user.availableCapital);
+    if (profile) return profile.getDisplayCapital();
+    return '₹0';
+  }, [user, profile]);
+
+  const rawCapital = user ? user.availableCapital : (profile ? profile.capital : 0);
+
   // Calculate initial project analysis
-  const baseResult: ProjectResult = useMemo(() => {
-    if (!profile) return null as any;
-    return analyseProject(profile.getProjectInputs());
-  }, [profile?.capital, profile?.cityKey, profile?.businessTypeKey]);
+  const baseResult: ProjectResult | null = useMemo(() => {
+    if (!projectInputs) return null;
+    return analyseProject(projectInputs);
+  }, [projectInputs]);
 
   // Recalculate with disaster impact
   const liveResult = useMemo(() => {
-    if (!baseResult) return null;
-    return recalculateWithDisaster(baseResult, disasterImpact, profile.capital);
-  }, [baseResult, disasterImpact, profile?.capital]);
+    if (!baseResult || !rawCapital) return null;
+    return recalculateWithDisaster(baseResult, disasterImpact, rawCapital);
+  }, [baseResult, disasterImpact, rawCapital]);
 
-  if (!profile || !baseResult) {
+  if (!projectInputs || !baseResult) {
     return (
       <ThemedView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -61,8 +87,8 @@ function DashboardScreen({ profile }: DashboardScreenProps) {
     );
   }
 
-  const tierBadge = TIER_BADGES[baseResult.tier];
-  const businessIcon = BUSINESS_ICONS[profile.businessTypeKey] || BUSINESS_ICONS.other;
+  const tierBadge = TIER_BADGES[baseResult.tier] || TIER_BADGES.rural;
+  const businessIcon = BUSINESS_ICONS[projectInputs.businessTypeKey] || BUSINESS_ICONS.other;
 
   // Risk components for breakdown
   const monthlyIncome = (baseResult.totalProjectCost * baseResult.marginPercent) / 12;
@@ -117,7 +143,7 @@ function DashboardScreen({ profile }: DashboardScreenProps) {
               Your Margin Capital
             </ThemedText>
             <ThemedText type="subtitle" style={styles.capitalAmount}>
-              {profile.getDisplayCapital()}
+              {displayCapital}
             </ThemedText>
           </View>
         </View>
@@ -279,10 +305,20 @@ function DashboardScreen({ profile }: DashboardScreenProps) {
   );
 }
 
-// WatermelonDB HOC to observe the profile
-const Enhanced = withObservables(['profileId'], ({ profileId }: { profileId: string }) => ({
-  profile: database.get<Profile>('profiles').findAndObserve(profileId),
-}))(DashboardScreen);
+import { of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
+
+// WatermelonDB HOC to observe the profile/business
+const Enhanced = withObservables(['profileId'], ({ profileId }: { profileId: string }) => {
+  return {
+    business: database.get<Business>('businesses').findAndObserve(profileId).pipe(
+      catchError(() => of(undefined))
+    ),
+    profile: database.get<Profile>('profiles').findAndObserve(profileId).pipe(
+      catchError(() => of(undefined))
+    ),
+  };
+})(DashboardScreen);
 
 export default function DashboardRoute() {
   const { profileId } = useLocalSearchParams<{ profileId: string }>();
