@@ -11,6 +11,7 @@ from app.api.routes import (
     evidence,
     decisions,
     sync,
+    ai_reports,
 )
 
 api_router = APIRouter()
@@ -27,3 +28,4 @@ api_router.include_router(finance.router)
 api_router.include_router(evidence.router)
 api_router.include_router(decisions.router)
 api_router.include_router(sync.router)
+api_router.include_router(ai_reports.router)  # Multi-Agent RAG Pipeline
