@@ -2,8 +2,9 @@ import { Platform } from 'react-native';
 
 // API base URL - will be set based on environment
 const getApiBaseUrl = () => {
-  // In development, use localhost for web, or the machine's IP for mobile
-  if (__DEV__) {
+  // Check if we are in development mode
+  const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : true;
+  if (isDev) {
     if (Platform.OS === 'web') {
       return 'http://localhost:8000';
     }
