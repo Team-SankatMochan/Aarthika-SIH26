@@ -8,9 +8,8 @@ const getApiBaseUrl = () => {
     if (Platform.OS === 'web') {
       return 'http://localhost:8000';
     }
-    // For mobile, you'll need to replace this with your machine's IP
-    // Example: return 'http://192.168.1.100:8000';
-    return 'http://localhost:8000';
+    // Fixed: Pointing directly to host machine IP so Expo Go can reach it
+    return 'http://10.148.175.24:8000';
   }
   // In production, use your deployed backend URL
   return 'https://your-backend-domain.com';
@@ -60,6 +59,12 @@ export const businessApi = {
 
   listBusinesses: () =>
     fetchApi('/businesses/'),
+
+  createAssumption: (businessId: string, assumptionData: any) =>
+    fetchApi(`/businesses/${businessId}/assumptions`, {
+      method: 'POST',
+      body: JSON.stringify(assumptionData),
+    }),
 };
 
 // AI Reports API

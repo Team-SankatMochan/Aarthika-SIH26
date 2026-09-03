@@ -1,0 +1,12 @@
+{
+  "gstin": "29ABCDE1234F1Z5",
+  "document_number": "INV-10027",
+  "document_date": "2026-09-02",
+  "from_pincode": "563101",
+  "to_pincode": "560001",
+  "taxable_value": 180000,
+  "total_invoice_value": 212400,
+  "transporter_id": "MOCKTRANS001",
+  "vehicle_number": "KA01AB1234",
+  "transport_mode": "ROAD"
+}

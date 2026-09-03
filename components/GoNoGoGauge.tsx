@@ -8,7 +8,6 @@ import Animated, {
 } from 'react-native-reanimated';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-const AnimatedG = Animated.createAnimatedComponent(G);
 
 interface GoNoGoGaugeProps {
   riskRatio: number;
@@ -35,18 +34,22 @@ export function GoNoGoGauge({
   const STROKE = (size * 18) / 220;
   const CIRCUMFERENCE = Math.PI * RADIUS;
   const CENTER_X = size / 2;
-  const CENTER_Y = size * 0.5;
+  const CENTER_Y = size * 0.65;
 
   const clamped = Math.min(Math.max(riskRatio, 0), 1);
   const animatedValue = useSharedValue(0);
 
   useEffect(() => {
     if (animated) {
+      // Short settle so the arc tracks fast slider drags instead of
+      // perpetually chasing them with a long restarting animation.
       animatedValue.value = withTiming(clamped, {
-        duration: 600,
+        duration: 180,
         easing: Easing.out(Easing.cubic),
       });
     } else {
+      // While a slider is actively being dragged, jump to the exact
+      // value so the arc stays glued to the thumb.
       animatedValue.value = clamped;
     }
   }, [clamped, animated]);
@@ -54,21 +57,19 @@ export function GoNoGoGauge({
   const animatedProps = useAnimatedProps(() => {
     const filled = CIRCUMFERENCE * animatedValue.value;
     return {
-      strokeDasharray: `${filled} ${CIRCUMFERENCE}`,
+      strokeDasharray: `${filled} ${CIRCUMFERENCE * 2}`,
     };
   });
 
-  const needleAnimatedProps = useAnimatedProps(() => {
-    const angle = 180 - animatedValue.value * 180;
-    return {
-      transform: `rotate(${angle} ${CENTER_X} ${CENTER_Y})`,
-    };
-  });
+  // Calculate static needle angle from the clamped ratio
+  // Since Animated.createAnimatedComponent(G) is unreliable on Android,
+  // use a static rotation that updates on re-render.
+  const needleAngle = clamped * 180 - 90;
 
   const percentage = Math.round(clamped * 100);
 
   return (
-    <Svg width={size} height={size * 0.55} viewBox={`0 0 ${size} ${size * 0.55}`}>
+    <Svg width={size} height={size * 0.85} viewBox={`0 0 ${size} ${size * 0.85}`}>
       {/* Background arc */}
       <Circle
         cx={CENTER_X}
@@ -82,29 +83,7 @@ export function GoNoGoGauge({
         origin={`${CENTER_X}, ${CENTER_Y}`}
       />
 
-      {/* Threshold markers */}
-      {showLabels && (
-        <>
-          {/* 0.4 marker */}
-          <Line
-            x1={CENTER_X - RADIUS * Math.cos((0.4 * Math.PI))}
-            y1={CENTER_Y - RADIUS * Math.sin((0.4 * Math.PI))}
-            x2={CENTER_X - (RADIUS - STROKE - 5) * Math.cos((0.4 * Math.PI))}
-            y2={CENTER_Y - (RADIUS - STROKE - 5) * Math.sin((0.4 * Math.PI))}
-            stroke="#888"
-            strokeWidth={2}
-          />
-          {/* 0.7 marker */}
-          <Line
-            x1={CENTER_X - RADIUS * Math.cos((0.7 * Math.PI))}
-            y1={CENTER_Y - RADIUS * Math.sin((0.7 * Math.PI))}
-            x2={CENTER_X - (RADIUS - STROKE - 5) * Math.cos((0.7 * Math.PI))}
-            y2={CENTER_Y - (RADIUS - STROKE - 5) * Math.sin((0.7 * Math.PI))}
-            stroke="#888"
-            strokeWidth={2}
-          />
-        </>
-      )}
+      {/* Threshold markers removed for cleaner look */}
 
       {/* Colored arc */}
       <AnimatedCircle
@@ -120,8 +99,8 @@ export function GoNoGoGauge({
         animatedProps={animatedProps}
       />
 
-      {/* Needle pointer */}
-      <AnimatedG animatedProps={needleAnimatedProps}>
+      {/* Needle pointer — static G rotation (AnimatedG crashes on Android) */}
+      <G rotation={needleAngle} origin={`${CENTER_X}, ${CENTER_Y}`}>
         <Line
           x1={CENTER_X}
           y1={CENTER_Y}
@@ -132,7 +111,7 @@ export function GoNoGoGauge({
           strokeLinecap="round"
         />
         <Circle cx={CENTER_X} cy={CENTER_Y} r={6} fill="#333" />
-      </AnimatedG>
+      </G>
 
       {/* Labels */}
       {showLabels && (
@@ -147,8 +126,8 @@ export function GoNoGoGauge({
             GO
           </SvgText>
           <SvgText
-            x={CENTER_X - 25}
-            y={CENTER_Y - RADIUS + STROKE + 25}
+            x={CENTER_X}
+            y={CENTER_Y - RADIUS - 15}
             fontSize={size * 0.055}
             fill="#EF9F27"
             fontWeight="bold"
@@ -168,11 +147,11 @@ export function GoNoGoGauge({
         </>
       )}
 
-      {/* Percentage display */}
+      {/* Percentage display moved inside the arc */}
       {showPercentage && (
         <SvgText
-          x={CENTER_X}
-          y={CENTER_Y + 15}
+          x={CENTER_X - 10}
+          y={CENTER_Y - 25}
           fontSize={size * 0.1}
           fill={zoneColor(clamped)}
           fontWeight="bold"

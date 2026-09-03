@@ -1,0 +1,13 @@
+# Get market prices
+curl "http://127.0.0.1:8000/api/v1/market-prices?commodity=Tomato&state=Karnataka"
+
+# Get finance schemes
+curl "http://127.0.0.1:8000/api/v1/schemes?category=finance"
+
+# Get AARTHIKA business context
+curl "http://127.0.0.1:8000/api/v1/business-context?commodity=Tomato&state=Karnataka"
+
+# Generate a mock token
+curl -X POST "http://127.0.0.1:8000/api/v1/ewaybill/auth" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"username\":\"demo\",\"password\":\"demo\"}"

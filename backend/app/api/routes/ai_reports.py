@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.db.session import get_db
-from app.services.azure_rag_pipeline import get_rag_pipeline
+from app.services.groq_rag_pipeline import get_rag_pipeline
 from app.models.business import Business
 from app.models.decision import Decision
 import json
@@ -59,28 +59,36 @@ async def generate_business_report(
     if not business.user:
         raise HTTPException(status_code=400, detail="Business has no associated user")
 
+    # Build a location string from the Location model fields
+    # (Location has no full_name property; village_or_city/district/state are the columns)
+    loc = business.location
+    location_str = "Unknown"
+    if loc:
+        parts = [p for p in [loc.village_or_city, loc.district, loc.state] if p]
+        location_str = ", ".join(parts) if parts else "Unknown"
+
     try:
         # Run the multi-agent pipeline
         pipeline = get_rag_pipeline()
         result = await pipeline.generate_report(
             business_id=business.id,
             business_category=business.business_category,
-            location=business.location.full_name if business.location else "Unknown",
+            location=location_str,
             capital=business.user.available_capital
         )
 
         # Store the decision in the database
         decision = Decision(
             business_id=business.id,
-            decision_type=result["final_recommendation"]["decision"],
+            decision=result["final_recommendation"]["decision"],
             rationale=result["final_recommendation"]["rationale"],
-            confidence_score=result["final_recommendation"]["confidence"],
-            summary=json.dumps({
+            confidence=result["final_recommendation"]["confidence"],
+            evidence_summary={
                 "market_analysis": result["market_analysis"],
                 "risk_assessment": result["risk_assessment"],
                 "modifications": result["final_recommendation"]["modifications"],
                 "next_steps": result["final_recommendation"]["next_steps"]
-            })
+            }
         )
         db.add(decision)
         db.commit()
@@ -98,6 +106,8 @@ async def generate_business_report(
         )
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
 
 
@@ -126,13 +136,13 @@ async def get_existing_report(
         raise HTTPException(status_code=404, detail="No report found for this business")
 
     # Parse the summary JSON
-    summary = json.loads(decision.summary) if decision.summary else {}
+    summary = decision.evidence_summary if decision.evidence_summary else {}
 
     return ReportResponse(
         business_id=business_id,
-        decision=decision.decision_type,
+        decision=decision.decision,
         rationale=decision.rationale,
-        confidence=decision.confidence_score,
+        confidence=float(decision.confidence),
         market_analysis=summary.get("market_analysis", {}),
         risk_assessment=summary.get("risk_assessment", {}),
         modifications=summary.get("modifications", []),
@@ -143,13 +153,13 @@ async def get_existing_report(
 @router.get("/health")
 async def health_check():
     """Check if Groq is configured correctly"""
-    import os
+    from app.core.config import settings
 
     required_vars = [
         "GROQ_API_KEY"
     ]
 
-    missing = [var for var in required_vars if not os.getenv(var)]
+    missing = [var for var in required_vars if not getattr(settings, var)]
 
     if missing:
         return {
