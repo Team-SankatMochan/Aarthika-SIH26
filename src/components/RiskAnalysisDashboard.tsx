@@ -250,12 +250,12 @@ function ExecutiveSummary({ riskData }: { riskData: RiskData }) {
   return (
     <Section title="Executive Risk Summary" subtitle="Overall viability & risk posture">
       <View style={styles.summaryRow}>
-        <Card style={styles.summaryGaugeCard}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
+        <View style={styles.summaryGaugeCard}>
+          <ThemedText type="smallBold" style={{ color: '#1F1F1F', marginBottom: 10 }}>
             Overall Risk
           </ThemedText>
           <GoNoGoGauge riskRatio={overallRiskScore} size={190} />
-        </Card>
+        </View>
 
         <View style={styles.summaryMetrics}>
           <MetricChip
@@ -288,7 +288,7 @@ function MetricChip({ label, value, tone }: { label: string; value: string; tone
   const theme = useTheme();
   return (
     <View style={[styles.metricChip, { backgroundColor: theme.backgroundElement }]}>
-      <ThemedText type="small" themeColor="textSecondary">
+      <ThemedText type="small" themeColor="textSecondary" style={{ flex: 1, marginRight: 8 }}>
         {label}
       </ThemedText>
       <ThemedText type="default" themeColor={tone} style={{ fontWeight: '700' }}>
@@ -438,25 +438,25 @@ function SwotMatrix({ riskData }: { riskData: RiskData }) {
           return (
             <View key={q.key} style={[styles.swotQuadrant, { borderTopColor: q.color }]}>
               <View style={styles.swotHeader}>
-                <ThemedText type="smallBold" themeColor="text">
+                <ThemedText type="smallBold" style={{ color: '#1F1F1F' }}>
                   {q.title.toUpperCase()}
                 </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
+                <ThemedText type="small" style={{ color: '#60646C' }}>
                   {q.sign}
                 </ThemedText>
               </View>
               {items.length === 0 ? (
-                <ThemedText type="small" themeColor="textSecondary">
+                <ThemedText type="small" style={{ color: '#60646C' }}>
                   No items identified
                 </ThemedText>
               ) : (
                 items.map((item, i) => (
                   <View key={i} style={styles.swotItem}>
-                    <ThemedText type="small" themeColor="text" style={{ fontWeight: '600' }}>
+                    <ThemedText type="small" style={{ fontWeight: '600', color: '#1F1F1F' }}>
                       • {item.finding}
                     </ThemedText>
                     {item.whyItMatters ? (
-                      <ThemedText type="small" themeColor="textSecondary">
+                      <ThemedText type="small" style={{ color: '#60646C' }}>
                         {item.whyItMatters}
                       </ThemedText>
                     ) : null}
@@ -976,30 +976,34 @@ function RecommendationCard({ riskData }: { riskData: RiskData }) {
         <Text style={[styles.recommendationBadge, { color: stylesByDecision.text, borderColor: stylesByDecision.border }]}>
           {decision}
         </Text>
-        <ThemedText type="small" themeColor="text" style={{ textAlign: 'center', marginTop: Spacing.two }}>
+        <ThemedText type="small" style={{ textAlign: 'center', marginTop: Spacing.two, color: '#3E2723' }}>
           {rationale}
         </ThemedText>
 
         {supportingPoints.length > 0 && (
           <View style={styles.recoColumn}>
-            <ThemedText type="smallBold" themeColor="text">
+            <ThemedText type="smallBold" style={{ color: '#3E2723' }}>
               Why?
             </ThemedText>
-            {supportingPoints.map((p, i) => (
-              <ThemedText key={i} type="small" themeColor="textSecondary" style={styles.recoBullet}>
-                • {p}
-              </ThemedText>
-            ))}
+            {supportingPoints.map((p, i) => {
+              // Quick fix for long decimals in the backend strings
+              const formattedP = p.replace(/(\d+\.\d{3})\d+(%)/g, '$1$2');
+              return (
+                <ThemedText key={i} type="small" style={[styles.recoBullet, { color: '#5D4037' }]}>
+                  • {formattedP}
+                </ThemedText>
+              );
+            })}
           </View>
         )}
 
         {actionItems.length > 0 && (
           <View style={styles.recoColumn}>
-            <ThemedText type="smallBold" themeColor="text">
+            <ThemedText type="smallBold" style={{ color: '#3E2723' }}>
               What would make this safer?
             </ThemedText>
             {actionItems.map((a, i) => (
-              <ThemedText key={i} type="small" themeColor="textSecondary" style={styles.recoBullet}>
+              <ThemedText key={i} type="small" style={[styles.recoBullet, { color: '#5D4037' }]}>
                 → {a}
               </ThemedText>
             ))}

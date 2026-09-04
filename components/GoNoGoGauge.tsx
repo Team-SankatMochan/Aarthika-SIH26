@@ -34,7 +34,7 @@ export function GoNoGoGauge({
   const STROKE = (size * 18) / 220;
   const CIRCUMFERENCE = Math.PI * RADIUS;
   const CENTER_X = size / 2;
-  const CENTER_Y = size * 0.65;
+  const CENTER_Y = size * 0.55;
 
   const clamped = Math.min(Math.max(riskRatio, 0), 1);
   const animatedValue = useSharedValue(0);
@@ -69,7 +69,7 @@ export function GoNoGoGauge({
   const percentage = Math.round(clamped * 100);
 
   return (
-    <Svg width={size} height={size * 0.85} viewBox={`0 0 ${size} ${size * 0.85}`}>
+    <Svg width={size} height={size * 0.75} viewBox={`0 0 ${size} ${size * 0.75}`}>
       {/* Background arc */}
       <Circle
         cx={CENTER_X}

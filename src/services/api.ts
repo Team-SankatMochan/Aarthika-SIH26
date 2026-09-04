@@ -9,7 +9,7 @@ const getApiBaseUrl = () => {
       return 'http://localhost:8000';
     }
     // Fixed: Pointing directly to host machine IP so Expo Go can reach it
-    return 'http://10.148.175.24:8000';
+    return 'http://10.172.185.24:8000';
   }
   // In production, use your deployed backend URL
   return 'https://your-backend-domain.com';
