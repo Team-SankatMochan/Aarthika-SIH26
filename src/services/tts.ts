@@ -12,6 +12,7 @@ import * as Speech from 'expo-speech';
 const VOICE_LANG: Record<string, string> = {
   en: 'en-IN',
   hi: 'hi-IN',
+  bn: 'bn-IN',
   ml: 'ml-IN',
   te: 'te-IN',
   pa: 'pa-IN',

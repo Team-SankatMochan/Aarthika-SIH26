@@ -354,69 +354,84 @@ function TopRisks({ riskData }: { riskData: RiskData }) {
   );
 }
 
-/* ── 3. Risk Register ── */
+/* ── 3. Risk Register (Mobile-first Stacked Cards) ── */
 function RiskRegister({ riskData }: { riskData: RiskData }) {
   if (riskData.risks.length === 0) return null;
 
   return (
     <Section title="Risk Register" subtitle="Quantified risks with exposure and mitigation">
-      <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-          <View style={[styles.registerTable, { minWidth: 700 }]}>
-            {/* Header */}
-            <View style={styles.registerHeader}>
-              <ThemedText type="smallBold" themeColor="text" style={styles.registerTh}>
-                Risk
-              </ThemedText>
-              <ThemedText type="smallBold" themeColor="text" style={styles.registerTh}>
-                Category
-              </ThemedText>
-              <ThemedText type="smallBold" themeColor="text" style={styles.registerTh}>
-                Probability
-              </ThemedText>
-              <ThemedText type="smallBold" themeColor="text" style={styles.registerTh}>
-                Impact
-              </ThemedText>
-              <ThemedText type="smallBold" themeColor="text" style={styles.registerTh}>
-                Severity
-              </ThemedText>
-              <ThemedText type="smallBold" themeColor="text" style={styles.registerTh}>
-                Exposure
-              </ThemedText>
-              <ThemedText type="smallBold" themeColor="text" style={styles.registerTh}>
-                Mitigation
-              </ThemedText>
-            </View>
-
-            {/* Rows */}
-            {riskData.risks.map((risk, i) => (
-              <View key={i} style={styles.registerRow}>
-                <ThemedText type="small" themeColor="text" style={styles.registerTd}>
-                  {risk.risk}
-                </ThemedText>
-                <ThemedText type="small" themeColor="text" style={styles.registerTd}>
-                  {risk.category}
-                </ThemedText>
-                <ThemedText type="small" themeColor="text" style={styles.registerTd}>
-                  {Math.round(risk.probability * 100)}%
-                </ThemedText>
-                <ThemedText type="small" themeColor="text" style={styles.registerTd}>
-                  {risk.impact}
-                </ThemedText>
-                <ThemedText type="small" themeColor={severityThemeColor(risk.severity)} style={styles.registerTd}>
-                  {risk.severity}
-                </ThemedText>
-                <ThemedText type="small" themeColor="text" style={styles.registerTd}>
-                  {formatINR(risk.financialExposure)}
-                </ThemedText>
-                <ThemedText type="small" themeColor="text" style={[styles.registerTd, { flex: 1.5 }]}>
-                  {risk.mitigation}
-                </ThemedText>
+      <View style={styles.riskCardList}>
+        {riskData.risks.map((risk, i) => {
+          const sevColor = SEVERITY_COLOR[risk.severity] || R.amber;
+          return (
+            <Card key={i} style={[styles.mobileRiskCard, { borderLeftColor: sevColor, borderLeftWidth: 4 }]}>
+              {/* Header: Risk title, category & severity pill */}
+              <View style={styles.mobileRiskHeader}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <ThemedText type="smallBold" themeColor="text" style={{ fontSize: 15, lineHeight: 20 }}>
+                    {risk.risk}
+                  </ThemedText>
+                  <View style={styles.mobileCategoryBadge}>
+                    <ThemedText type="small" themeColor="textSecondary" style={{ fontSize: 11, fontWeight: '600' }}>
+                      {risk.category}
+                    </ThemedText>
+                  </View>
+                </View>
+                <View style={[styles.severityPill, { backgroundColor: sevColor + '20', borderColor: sevColor }]}>
+                  <Text style={[styles.severityPillText, { color: sevColor }]}>
+                    {risk.severity}
+                  </Text>
+                </View>
               </View>
-            ))}
-          </View>
-        </ScrollView>
-      </Card>
+
+              {/* Stats row: Probability, Impact, Financial Exposure */}
+              <View style={styles.mobileRiskStatsRow}>
+                <View style={styles.mobileRiskStatItem}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
+                    Probability
+                  </ThemedText>
+                  <ThemedText type="smallBold" themeColor="text" style={styles.statMiniValue}>
+                    {Math.round(risk.probability * 100)}%
+                  </ThemedText>
+                </View>
+
+                <View style={styles.mobileRiskStatItem}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
+                    Impact
+                  </ThemedText>
+                  <ThemedText type="smallBold" themeColor="text" style={styles.statMiniValue}>
+                    {risk.impact}
+                  </ThemedText>
+                </View>
+
+                <View style={styles.mobileRiskStatItem}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
+                    Exposure
+                  </ThemedText>
+                  <ThemedText type="smallBold" themeColor="textError" style={styles.statMiniValue}>
+                    {formatINR(risk.financialExposure)}
+                  </ThemedText>
+                </View>
+              </View>
+
+              {/* Mitigation Box */}
+              {risk.mitigation ? (
+                <View style={styles.mobileMitigationBox}>
+                  <Text style={styles.mitigationShieldIcon}>🛡️</Text>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText type="smallBold" themeColor="textSecondary" style={{ fontSize: 11, marginBottom: 2 }}>
+                      Mitigation Strategy
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="text" style={{ fontSize: 12, lineHeight: 17 }}>
+                      {risk.mitigation}
+                    </ThemedText>
+                  </View>
+                </View>
+              ) : null}
+            </Card>
+          );
+        })}
+      </View>
     </Section>
   );
 }
@@ -1419,30 +1434,76 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.one,
   },
-  // RiskRegister styles
-  registerTable: {
-    marginVertical: Spacing.two,
+  /* Mobile Risk Register styles */
+  riskCardList: {
+    gap: Spacing.two,
   },
-  registerHeader: {
-    flexDirection: 'row',
+  mobileRiskCard: {
+    padding: Spacing.two,
+    borderRadius: 14,
     marginBottom: Spacing.one,
-    paddingHorizontal: Spacing.two,
   },
-  registerTh: {
-    flex: 1,
-    fontSize: 12,
-  },
-  registerRow: {
+  mobileRiskHeader: {
     flexDirection: 'row',
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(216, 194, 181, 0.2)',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: Spacing.two,
   },
-  registerTd: {
+  mobileCategoryBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(150,150,150,0.12)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginTop: 4,
+  },
+  severityPill: {
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  severityPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  mobileRiskStatsRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(150,150,150,0.06)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginBottom: Spacing.one,
+    justifyContent: 'space-between',
+  },
+  mobileRiskStatItem: {
     flex: 1,
-    fontSize: 12,
-  }
+    alignItems: 'center',
+  },
+  statMiniLabel: {
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  statMiniValue: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  mobileMitigationBox: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(99,153,34,0.08)',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 4,
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  mitigationShieldIcon: {
+    fontSize: 14,
+    marginTop: 1,
+  },
 });
 
 function LegendDot({ color, label }: { color: string; label: string }) {
