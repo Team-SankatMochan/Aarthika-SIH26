@@ -3,10 +3,10 @@ from typing import List, Optional
 from decimal import Decimal
 from sqlalchemy import String, Text, Numeric, Integer, Date, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class Pilot(Base):
+class Pilot(Base, SyncableMixin):
     __tablename__ = "pilots"
 
     id: Mapped[str] = mapped_column(
@@ -38,7 +38,7 @@ class Pilot(Base):
     )
 
 
-class PilotResult(Base):
+class PilotResult(Base, SyncableMixin):
     __tablename__ = "pilot_results"
 
     id: Mapped[str] = mapped_column(

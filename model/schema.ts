@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export default appSchema({
-    version: 2,
+    version: 3,
     tables: [
         // ─── Core Entities ─────────────────────────────────────────
 
@@ -14,8 +14,10 @@ export default appSchema({
                 { name: 'village_or_city', type: 'string', isOptional: true },
                 { name: 'latitude', type: 'number', isOptional: true },
                 { name: 'longitude', type: 'number', isOptional: true },
+                { name: 'location_type', type: 'string', isOptional: true }, // P1
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -34,6 +36,7 @@ export default appSchema({
                 { name: 'risk_tolerance', type: 'string', isOptional: true },
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -48,6 +51,7 @@ export default appSchema({
                 { name: 'status', type: 'string' }, // planning, testing, validated, financed
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -68,6 +72,7 @@ export default appSchema({
                 { name: 'is_estimated', type: 'boolean' },
                 { name: 'metadata_json', type: 'string', isOptional: true }, // JSON string
                 { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -89,6 +94,7 @@ export default appSchema({
                 { name: 'confidence', type: 'number', isOptional: true },
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -104,6 +110,7 @@ export default appSchema({
                 { name: 'status', type: 'string' }, // pending, running, completed
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -124,6 +131,7 @@ export default appSchema({
                 { name: 'resilience_score', type: 'number', isOptional: true },
                 { name: 'result_status', type: 'string' }, // viable, stressed, unviable
                 { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -141,6 +149,7 @@ export default appSchema({
                 { name: 'end_date', type: 'number', isOptional: true },
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -159,6 +168,7 @@ export default appSchema({
                 { name: 'customer_feedback', type: 'string', isOptional: true },
                 { name: 'observations', type: 'string', isOptional: true },
                 { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -171,8 +181,12 @@ export default appSchema({
                 { name: 'scheme_type', type: 'string' },
                 { name: 'description', type: 'string', isOptional: true },
                 { name: 'active', type: 'boolean' },
+                { name: 'official_source_name', type: 'string', isOptional: true }, // P1
+                { name: 'official_source_url', type: 'string', isOptional: true }, // P1
+                { name: 'last_verified_at', type: 'number', isOptional: true }, // P1
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -190,8 +204,16 @@ export default appSchema({
                 { name: 'effective_from', type: 'number', isOptional: true },
                 { name: 'effective_to', type: 'number', isOptional: true },
                 { name: 'active', type: 'boolean' },
+                { name: 'rule_version', type: 'number' }, // P1
+                { name: 'moratorium_interest_method', type: 'string' }, // P1
+                { name: 'location_type', type: 'string', isOptional: true }, // P1
+                { name: 'allowed_business_categories', type: 'string', isOptional: true }, // P1
+                { name: 'source_name', type: 'string', isOptional: true }, // P1
+                { name: 'source_url', type: 'string', isOptional: true }, // P1
+                { name: 'last_verified_at', type: 'number', isOptional: true }, // P1
                 { name: 'created_at', type: 'number' },
                 { name: 'updated_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -216,7 +238,10 @@ export default appSchema({
                 { name: 'debt_service_burden', type: 'number' },
                 { name: 'working_capital_requirement', type: 'number' },
                 { name: 'calculation_version', type: 'number' },
+                { name: 'scheme_rule_version', type: 'number', isOptional: true }, // P1
+                { name: 'scheme_last_verified_at', type: 'number', isOptional: true }, // P1
                 { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -234,6 +259,7 @@ export default appSchema({
                 { name: 'is_observed', type: 'boolean' },
                 { name: 'is_estimated', type: 'boolean' },
                 { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -248,6 +274,7 @@ export default appSchema({
                 { name: 'assumptions_summary', type: 'string', isOptional: true }, // JSON string
                 { name: 'financial_risk_summary', type: 'string', isOptional: true }, // JSON string
                 { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -263,6 +290,7 @@ export default appSchema({
                 { name: 'business_label', type: 'string' },
                 { name: 'tier', type: 'string' },
                 { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 

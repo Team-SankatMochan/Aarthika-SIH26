@@ -26,6 +26,12 @@ def sync_database(sync_req: SyncRequest, db: Session = Depends(get_db)):
     try:
         response = process_sync_request(sync_req, db)
         return response
+    except ValueError as ve:
+        logger.warning(f"Sync validation error: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Synchronization validation error: {str(ve)}",
+        )
     except Exception as e:
         logger.error(f"Sync error: {e}", exc_info=True)
         raise HTTPException(

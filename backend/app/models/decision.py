@@ -3,10 +3,10 @@ from typing import Optional, Any
 from decimal import Decimal
 from sqlalchemy import String, Text, Numeric, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class Decision(Base):
+class Decision(Base, SyncableMixin):
     __tablename__ = "decisions"
 
     id: Mapped[str] = mapped_column(
@@ -17,7 +17,7 @@ class Decision(Base):
     )
     decision: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True
-    )  # GO, MODIFY, DO_NOT_INVEST_YET
+    )  # INSUFFICIENT_DATA, INCOMPLETE, TEST_FIRST, MODIFY, HIGH_RISK, READY_FOR_FINANCE_REVIEW
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[Decimal] = mapped_column(
         Numeric(5, 2), default=Decimal("0.80"), nullable=False

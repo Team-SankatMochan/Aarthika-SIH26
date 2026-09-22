@@ -3,6 +3,11 @@ import { field, readonly, date, relation } from '@nozbe/watermelondb/decorators'
 import type Business from './Business';
 
 export default class Evidence extends Model {
+    /**
+     * Represents the PostgreSQL BIGINT monotonic global sync sequence revision.
+     * Represented as JS number for current SIH prototype scale without creating a second revision system.
+     */
+    @field('server_revision') serverRevision!: number;
     static table = 'evidence';
     static associations = {
         businesses: { type: 'belongs_to', key: 'business_id' },

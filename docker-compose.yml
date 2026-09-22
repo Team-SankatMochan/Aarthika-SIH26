@@ -19,6 +19,20 @@ services:
       timeout: 5s
       retries: 5
 
+  mock_provider:
+    build:
+      context: ./AARTHIKA_mock_api/aarthika_mock_api
+      dockerfile: Dockerfile
+    container_name: arthsetu_mock_provider
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: ./backend
@@ -28,10 +42,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mock_provider:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-arthsetu_user}:${POSTGRES_PASSWORD:-arthsetu_password}@postgres:5432/${POSTGRES_DB:-arthsetu_db}
       ENVIRONMENT: development
       DEBUG: "True"
+      PROVIDER_MODE: ${PROVIDER_MODE:-MOCK}
+      MOCK_PROVIDER_URL: http://mock_provider:8001
     ports:
       - "8000:8000"
     volumes:

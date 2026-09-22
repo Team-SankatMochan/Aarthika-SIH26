@@ -1,8 +1,9 @@
 import { Model } from '@nozbe/watermelondb';
 import { field, readonly, date } from '@nozbe/watermelondb/decorators';
-import { formatINR, type ProjectInputs } from '../engine/financials';
+import { formatINR } from '../engine/financeCalculator';
 
 export default class Profile extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'profiles';
 
     @field('capital') capital!: number;
@@ -25,14 +26,5 @@ export default class Profile extends Model {
     // Display formatting
     getDisplayCapital(): string {
         return formatINR(this.capital);
-    }
-
-    // Returns inputs for the financial engine
-    getProjectInputs(): ProjectInputs {
-        return {
-            marginCapital: this.capital,
-            cityKey: this.cityKey,
-            businessTypeKey: this.businessTypeKey,
-        };
     }
 }

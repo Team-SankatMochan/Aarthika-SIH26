@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "arthsetu_db"
     DATABASE_URL: str = "postgresql://arthsetu_user:arthsetu_password@localhost:5432/arthsetu_db"
 
+    # Phase 2 P2: Evidence Provider Configuration
+    PROVIDER_MODE: str = "MOCK"  # "MOCK" or "LIVE"
+    MOCK_PROVIDER_URL: str = "http://127.0.0.1:8001"
+    LIVE_PROVIDER_URL: str | None = None
+
     # Security & CORS
     SECRET_KEY: str = "dev_secret_key_change_in_production_phase2"
     BACKEND_CORS_ORIGINS: Union[List[str], str] = [

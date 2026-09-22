@@ -44,7 +44,14 @@ if missing:
     print("   3. Create API key")
     print("   4. Add to backend/.env:")
     print("      GROQ_API_KEY=your_key_here")
-    exit(1)
+    
+    # Check if we are running in pytest
+    import sys
+    if "pytest" in sys.modules:
+        import pytest
+        pytest.skip("Skipping Groq setup test because API key is missing")
+    else:
+        exit(1)
 
 print("\n✅ All environment variables are set!")
 
@@ -134,7 +141,12 @@ except Exception as e:
     print(f"   ❌ Pipeline test failed: {str(e)}")
     import traceback
     traceback.print_exc()
-    exit(1)
+    import sys
+    if "pytest" in sys.modules:
+        import pytest
+        pytest.fail(f"Pipeline test failed: {str(e)}")
+    else:
+        exit(1)
 
 print("\n" + "=" * 60)
 print("✅ ALL TESTS PASSED!")

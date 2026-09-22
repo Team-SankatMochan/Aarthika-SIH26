@@ -2,10 +2,10 @@ from datetime import datetime
 from typing import List, Optional
 from sqlalchemy import String, Text, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class Business(Base):
+class Business(Base, SyncableMixin):
     __tablename__ = "businesses"
 
     id: Mapped[str] = mapped_column(

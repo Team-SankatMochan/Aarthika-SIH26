@@ -3,6 +3,7 @@ import { field, readonly, date, relation } from '@nozbe/watermelondb/decorators'
 import type Business from './Business';
 
 export default class Decision extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'decisions';
     static associations = {
         businesses: { type: 'belongs_to', key: 'business_id' },

@@ -3,10 +3,10 @@ from typing import List, Optional
 from decimal import Decimal
 from sqlalchemy import String, Text, Numeric, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class StressTest(Base):
+class StressTest(Base, SyncableMixin):
     __tablename__ = "stress_tests"
 
     id: Mapped[str] = mapped_column(
@@ -39,7 +39,7 @@ class StressTest(Base):
     )
 
 
-class StressTestScenario(Base):
+class StressTestScenario(Base, SyncableMixin):
     __tablename__ = "stress_test_scenarios"
 
     id: Mapped[str] = mapped_column(

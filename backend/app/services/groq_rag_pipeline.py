@@ -8,14 +8,11 @@ optimized LLM call.
 
 import os
 import json
-import httpx
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 from typing import TypedDict, Annotated, Sequence
 from operator import add
 
-from langchain_groq import ChatGroq
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
@@ -41,11 +38,6 @@ class RiskAssessment(BaseModel):
     overall_risk: float
     top_risks: list[str]
     mitigation_strategies: list[str]
-    safer_loan_amount: int
-
-class FinancialProjections(BaseModel):
-    expected_roi_percentage: float
-    break_even_months: int
 
 class UnifiedReport(BaseModel):
     decision: str = Field(description="GO | MODIFY | DO_NOT_INVEST_YET")
@@ -53,11 +45,8 @@ class UnifiedReport(BaseModel):
     rationale: str
     market_analysis: MarketAnalysis
     risk_assessment: RiskAssessment
-    financial_projections: FinancialProjections
     modifications: list[str]
     next_steps: list[str]
-
-# State Definition
 class AgentState(TypedDict):
     business_id: str
     business_category: str
@@ -72,6 +61,8 @@ class AgentState(TypedDict):
 
 class GroqRAGPipeline:
     def __init__(self):
+        from langchain_groq import ChatGroq
+        from langchain_community.embeddings import HuggingFaceEmbeddings
         self.llm = ChatGroq(
             model="openai/gpt-oss-120b",
             temperature=0.2,
@@ -87,40 +78,16 @@ class GroqRAGPipeline:
 
     def _retrieve_context(self, state: AgentState) -> dict:
         query = f"{state['business_category']} business in {state['location']} with capital {state['capital']}"
-        try:
-            # Call the AARTHIKA_mock_api context retriever
-            # e.g. /api/v1/business-context?commodity=Tomato&state=Karnataka
-            # We map business_category -> commodity for the demo.
-            demo_api_url = "http://127.0.0.1:8001/api/v1/business-context"
-            params = {
-                "commodity": state['business_category'],
-                "state": state['location']
-            }
-
-            with httpx.Client(timeout=10.0) as client:
-                res = client.get(demo_api_url, params=params)
-                if res.status_code == 200:
-                    data = res.json()
-                    retrieved_context = f"""
-[LIVE GOV DATA CONTEXT]
-Target: {data.get('commodity')} in {data.get('state')}
-Risk Indicators: {json.dumps(data.get('risk_indicators'), indent=2)}
-Recommended Checks: {json.dumps(data.get('recommended_checks'), indent=2)}
-Market Snapshot: {json.dumps(data.get('market_snapshot'), indent=2)}
-"""
-                else:
-                    retrieved_context = f"Demo API returned status {res.status_code}. Using general heuristics."
-
-            # Append the financial estimates
-            capital_float = float(state['capital']) if state['capital'] else 0.0
-            retrieved_context += f"""
-[FINANCIAL ESTIMATES]
+        # Phase 2 P2: Direct raw HTTP provider fetch removed to prevent unverified bypass.
+        # External provider context injection disabled until Phase 2 P3 Evidence-based RAG.
+        capital_float = float(state['capital']) if state['capital'] else 0.0
+        retrieved_context = f"""
+[BUSINESS PROFILE & FINANCIAL ESTIMATES]
+- Business Category: {state['business_category']}
+- Location: {state['location']}
 - Average startup cost: ₹{capital_float * 0.8:.0f} to ₹{capital_float * 1.2:.0f}
 - Monthly revenue potential: ₹{capital_float * 0.15:.0f} to ₹{capital_float * 0.25:.0f}
-            """
-        except Exception as e:
-            retrieved_context = f"Limited market data available. Local heuristics only. Error: {str(e)}"
-
+"""
         return {
             "retrieved_context": retrieved_context,
             "messages": [HumanMessage(content=f"Retrieved context for {query}")]
@@ -196,6 +163,7 @@ Market Context:
             # A single retry with a slightly higher temperature usually
             # recovers from a truncated / malformed first attempt.
             print(f"[pipeline] JSON-mode attempt failed ({first_err}); retrying once")
+            from langchain_groq import ChatGroq
             warm_llm = ChatGroq(
                 model=self.llm.model_name,
                 temperature=0.4,

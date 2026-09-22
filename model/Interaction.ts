@@ -3,6 +3,7 @@ import { field, date, relation } from '@nozbe/watermelondb/decorators';
 import Profile from './profile';
 
 export default class Interaction extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'interactions';
 
     @field('profile_id') profileId!: string;

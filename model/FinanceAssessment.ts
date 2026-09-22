@@ -3,6 +3,7 @@ import { field, readonly, date, relation } from '@nozbe/watermelondb/decorators'
 import type Business from './Business';
 
 export default class FinanceAssessment extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'finance_assessments';
     static associations = {
         businesses: { type: 'belongs_to', key: 'business_id' },
@@ -26,6 +27,11 @@ export default class FinanceAssessment extends Model {
     @field('debt_service_burden') debtServiceBurden!: number;
     @field('working_capital_requirement') workingCapitalRequirement!: number;
     @field('calculation_version') calculationVersion!: number;
+    
+    // P1 fields
+    @field('scheme_rule_version') schemeRuleVersion?: number;
+    @date('scheme_last_verified_at') schemeLastVerifiedAt?: number;
+    
     @readonly @date('created_at') createdAt!: number;
 
     @relation('businesses', 'business_id') business!: Relation<Business>;

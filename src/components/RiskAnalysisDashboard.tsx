@@ -11,7 +11,7 @@ import {
 import Slider from '@react-native-community/slider';
 import Svg, { Rect, Line, Polygon, Polyline, Circle, Text as SvgText } from 'react-native-svg';
 import { GoNoGoGauge } from '../../components/GoNoGoGauge';
-import { formatINR } from '../../engine/financials';
+import { formatINR } from '../../engine/financeCalculator';
 import { ThemedView } from './themed-view';
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';

@@ -3,6 +3,7 @@ import { field, readonly, date, relation } from '@nozbe/watermelondb/decorators'
 import type Scheme from './Scheme';
 
 export default class SchemeRule extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'scheme_rules';
     static associations = {
         schemes: { type: 'belongs_to', key: 'scheme_id' },
@@ -19,6 +20,15 @@ export default class SchemeRule extends Model {
     @date('effective_from') effectiveFrom!: number;
     @date('effective_to') effectiveTo!: number;
     @field('active') active!: boolean;
+    
+    // P1 fields
+    @field('rule_version') ruleVersion!: number;
+    @field('moratorium_interest_method') moratoriumInterestMethod!: string;
+    @field('location_type') locationType?: string;
+    @field('allowed_business_categories') allowedBusinessCategories?: string; // JSON string
+    @field('source_name') sourceName?: string;
+    @field('source_url') sourceUrl?: string;
+    @date('last_verified_at') lastVerifiedAt?: number;
     @readonly @date('created_at') createdAt!: number;
     @date('updated_at') updatedAt!: number;
 

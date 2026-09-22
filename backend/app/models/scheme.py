@@ -3,10 +3,10 @@ from typing import List, Optional
 from decimal import Decimal
 from sqlalchemy import String, Text, Numeric, Integer, Boolean, Date, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class Scheme(Base):
+class Scheme(Base, SyncableMixin):
     __tablename__ = "schemes"
 
     id: Mapped[str] = mapped_column(
@@ -20,6 +20,13 @@ class Scheme(Base):
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # P1: provenance metadata
+    official_source_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    official_source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
@@ -37,7 +44,7 @@ class Scheme(Base):
     )
 
 
-class SchemeRule(Base):
+class SchemeRule(Base, SyncableMixin):
     __tablename__ = "scheme_rules"
 
     id: Mapped[str] = mapped_column(
@@ -46,6 +53,7 @@ class SchemeRule(Base):
     scheme_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("schemes.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Keep original tenure_months; finance_service derives repayment_tenure from it
     min_project_cost: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), default=Decimal("0.00"), nullable=False
     )
@@ -60,6 +68,19 @@ class SchemeRule(Base):
     effective_from: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     effective_to: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # P1: new fields
+    rule_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    moratorium_interest_method: Mapped[str] = mapped_column(
+        String(30), default="NONE", nullable=False
+    )
+    location_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    allowed_business_categories: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    source_name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False

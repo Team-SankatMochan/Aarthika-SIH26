@@ -38,6 +38,23 @@ class FinanceAssessmentBase(BaseModel):
     debt_service_burden: Decimal = Field(..., ge=0, examples=[26.94])
     working_capital_requirement: Decimal = Field(default=Decimal("0.00"), ge=0)
     calculation_version: int = Field(default=1, ge=1)
+    
+    # --- New Canonical Assessment Fields ---
+    monthly_revenue: Optional[Decimal] = Field(None, ge=0)
+    monthly_variable_cost: Optional[Decimal] = Field(None, ge=0)
+    monthly_fixed_cost: Optional[Decimal] = Field(None, ge=0)
+    monthly_business_surplus: Optional[Decimal] = Field(None)
+    
+    maximum_scheme_loan_amount: Optional[Decimal] = Field(None, ge=0)
+    affordable_loan_amount: Optional[Decimal] = Field(None, ge=0)
+    
+    business_dscr: Optional[Decimal] = Field(None, ge=0)
+    household_existing_debt_ratio: Optional[Decimal] = Field(None, ge=0)
+    household_buffer_ratio: Optional[Decimal] = Field(None)
+    break_even_units: Optional[int] = Field(None)
+    
+    policy_version: int = Field(default=1, ge=1)
+    input_hash: Optional[str] = Field(None, max_length=64)
 
 
 class FinanceAssessmentCreate(FinanceAssessmentBase):

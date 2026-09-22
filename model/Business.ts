@@ -10,6 +10,7 @@ import type Decision from './Decision';
 import type FinanceAssessment from './FinanceAssessment';
 
 export default class Business extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'businesses';
     static associations = {
         users: { type: 'belongs_to', key: 'user_id' },

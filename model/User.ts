@@ -3,6 +3,7 @@ import { field, readonly, date, relation } from '@nozbe/watermelondb/decorators'
 import type Location from './Location';
 
 export default class User extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'users';
     static associations = {
         locations: { type: 'belongs_to', key: 'location_id' },

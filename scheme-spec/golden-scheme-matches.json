@@ -1,0 +1,660 @@
+{
+  "meta": {
+    "description": "Golden fixtures for deterministic scheme compatibility matching — Phase 2 P1",
+    "canonical_moratorium_methods": ["NONE", "SIMPLE_CAPITALIZE", "COMPOUND_CAPITALIZE"],
+    "canonical_location_types": ["RURAL", "URBAN", "SEMI_URBAN"],
+    "freshness_stale_hours": 720
+  },
+  "cases": [
+    {
+      "id": "01_normal_compatible",
+      "description": "All constraints pass — fully compatible",
+      "profile": {
+        "project_cost": 100000.00,
+        "requested_loan_amount": 80000.00,
+        "location_type": "RURAL",
+        "business_category": "FOOD_PROCESSING"
+      },
+      "scheme_rule": {
+        "id": "rule-001",
+        "scheme_id": "scheme-001",
+        "rule_version": 1,
+        "min_project_cost": 10000.00,
+        "max_project_cost": 200000.00,
+        "max_loan_amount": 125000.00,
+        "active": true,
+        "effective_from": "2024-01-01",
+        "effective_to": null,
+        "location_type": "RURAL",
+        "allowed_business_categories": ["FOOD_PROCESSING", "TEXTILE"],
+        "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE",
+        "validity": "ACTIVE",
+        "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount", "location_type", "business_category"],
+        "failed_rules": [],
+        "missing_fields": [],
+        "warnings": []
+      }
+    },
+    {
+      "id": "02_exact_min_project_cost",
+      "description": "Project cost exactly equals min — inclusive boundary",
+      "profile": {
+        "project_cost": 10000.00,
+        "requested_loan_amount": 9000.00,
+        "location_type": null,
+        "business_category": null
+      },
+      "scheme_rule": {
+        "id": "rule-002",
+        "scheme_id": "scheme-001",
+        "rule_version": 1,
+        "min_project_cost": 10000.00,
+        "max_project_cost": 200000.00,
+        "max_loan_amount": 125000.00,
+        "active": true,
+        "effective_from": "2024-01-01",
+        "effective_to": null,
+        "location_type": null,
+        "allowed_business_categories": null,
+        "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE",
+        "validity": "ACTIVE",
+        "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [],
+        "missing_fields": [],
+        "warnings": []
+      }
+    },
+    {
+      "id": "03_exact_max_project_cost",
+      "description": "Project cost exactly equals max — inclusive boundary",
+      "profile": {
+        "project_cost": 200000.00,
+        "requested_loan_amount": 125000.00,
+        "location_type": null,
+        "business_category": null
+      },
+      "scheme_rule": {
+        "id": "rule-003",
+        "scheme_id": "scheme-001",
+        "rule_version": 1,
+        "min_project_cost": 10000.00,
+        "max_project_cost": 200000.00,
+        "max_loan_amount": 125000.00,
+        "active": true,
+        "effective_from": "2024-01-01",
+        "effective_to": null,
+        "location_type": null,
+        "allowed_business_categories": null,
+        "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE",
+        "validity": "ACTIVE",
+        "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [],
+        "missing_fields": [],
+        "warnings": []
+      }
+    },
+    {
+      "id": "04_below_min_project_cost",
+      "description": "Project cost below minimum",
+      "profile": {
+        "project_cost": 5000.00,
+        "requested_loan_amount": 4000.00,
+        "location_type": null,
+        "business_category": null
+      },
+      "scheme_rule": {
+        "id": "rule-004",
+        "scheme_id": "scheme-001",
+        "rule_version": 1,
+        "min_project_cost": 10000.00,
+        "max_project_cost": 200000.00,
+        "max_loan_amount": 125000.00,
+        "active": true,
+        "effective_from": "2024-01-01",
+        "effective_to": null,
+        "location_type": null,
+        "allowed_business_categories": null,
+        "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE",
+        "validity": "ACTIVE",
+        "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "loan_amount"],
+        "failed_rules": [{"field": "project_cost", "reason": "BELOW_MINIMUM", "actual": 5000.00, "allowed_min": 10000.00}],
+        "missing_fields": [],
+        "warnings": []
+      }
+    },
+    {
+      "id": "05_above_max_project_cost",
+      "description": "Project cost above maximum",
+      "profile": {
+        "project_cost": 600000.00,
+        "requested_loan_amount": 125000.00,
+        "location_type": null,
+        "business_category": null
+      },
+      "scheme_rule": {
+        "id": "rule-005",
+        "scheme_id": "scheme-001",
+        "rule_version": 1,
+        "min_project_cost": 10000.00,
+        "max_project_cost": 500000.00,
+        "max_loan_amount": 125000.00,
+        "active": true,
+        "effective_from": "2024-01-01",
+        "effective_to": null,
+        "location_type": null,
+        "allowed_business_categories": null,
+        "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE",
+        "validity": "ACTIVE",
+        "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "loan_amount"],
+        "failed_rules": [{"field": "project_cost", "reason": "ABOVE_MAXIMUM", "actual": 600000.00, "allowed_max": 500000.00}],
+        "missing_fields": [],
+        "warnings": []
+      }
+    },
+    {
+      "id": "06_requested_loan_exactly_max",
+      "description": "Requested loan amount equals max exactly — inclusive",
+      "profile": {
+        "project_cost": 100000.00,
+        "requested_loan_amount": 125000.00,
+        "location_type": null,
+        "business_category": null
+      },
+      "scheme_rule": {
+        "id": "rule-006",
+        "scheme_id": "scheme-001",
+        "rule_version": 1,
+        "min_project_cost": 10000.00,
+        "max_project_cost": 200000.00,
+        "max_loan_amount": 125000.00,
+        "active": true,
+        "effective_from": "2024-01-01",
+        "effective_to": null,
+        "location_type": null,
+        "allowed_business_categories": null,
+        "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE",
+        "validity": "ACTIVE",
+        "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [],
+        "missing_fields": [],
+        "warnings": []
+      }
+    },
+    {
+      "id": "07_requested_loan_above_max",
+      "description": "Requested loan exceeds maximum",
+      "profile": {
+        "project_cost": 100000.00,
+        "requested_loan_amount": 130000.00,
+        "location_type": null,
+        "business_category": null
+      },
+      "scheme_rule": {
+        "id": "rule-007",
+        "scheme_id": "scheme-001",
+        "rule_version": 1,
+        "min_project_cost": 10000.00,
+        "max_project_cost": 200000.00,
+        "max_loan_amount": 125000.00,
+        "active": true,
+        "effective_from": "2024-01-01",
+        "effective_to": null,
+        "location_type": null,
+        "allowed_business_categories": null,
+        "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE",
+        "validity": "ACTIVE",
+        "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range"],
+        "failed_rules": [{"field": "requested_loan_amount", "reason": "ABOVE_MAXIMUM", "actual": 130000.00, "allowed_max": 125000.00}],
+        "missing_fields": [],
+        "warnings": []
+      }
+    },
+    {
+      "id": "08_inactive_rule",
+      "description": "Rule is inactive",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-008", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": false, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE", "validity": "INACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": [], "failed_rules": [{"field": "active", "reason": "RULE_INACTIVE"}], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "09_not_yet_effective",
+      "description": "Rule not yet effective",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-009", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2027-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE", "validity": "NOT_YET_EFFECTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": [], "failed_rules": [{"field": "effective_from", "reason": "NOT_YET_EFFECTIVE"}], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "10_expired_rule",
+      "description": "Rule has expired",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-010", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": "2025-12-31",
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE", "validity": "EXPIRED", "freshness": "VERIFIED_FRESH",
+        "passed_rules": [], "failed_rules": [{"field": "effective_to", "reason": "EXPIRED"}], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "11_missing_project_cost",
+      "description": "Profile missing project_cost",
+      "profile": { "project_cost": null, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-011", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "INSUFFICIENT_DATA", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "loan_amount"],
+        "failed_rules": [],
+        "missing_fields": ["project_cost"],
+        "warnings": []
+      }
+    },
+    {
+      "id": "12_null_location_constraint",
+      "description": "Rule has null location_type — NOT_APPLICABLE",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": "URBAN", "business_category": null },
+      "scheme_rule": {
+        "id": "rule-012", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "13_location_match",
+      "description": "Location type matches rule requirement",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": "RURAL", "business_category": null },
+      "scheme_rule": {
+        "id": "rule-013", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": "RURAL", "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount", "location_type"],
+        "failed_rules": [], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "14_location_mismatch",
+      "description": "Location type does not match rule",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": "URBAN", "business_category": null },
+      "scheme_rule": {
+        "id": "rule-014", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": "RURAL", "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [{"field": "location_type", "reason": "LOCATION_MISMATCH", "actual": "URBAN", "required": "RURAL"}],
+        "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "15_missing_required_location",
+      "description": "Rule requires location_type but profile is missing it",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-015", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": "RURAL", "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "INSUFFICIENT_DATA", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [],
+        "missing_fields": ["location_type"],
+        "warnings": []
+      }
+    },
+    {
+      "id": "16_category_match",
+      "description": "Business category in allowed list",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": "TEXTILE" },
+      "scheme_rule": {
+        "id": "rule-016", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": ["FOOD_PROCESSING", "TEXTILE"], "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount", "business_category"],
+        "failed_rules": [], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "17_category_mismatch",
+      "description": "Business category not in allowed list",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": "CONSTRUCTION" },
+      "scheme_rule": {
+        "id": "rule-017", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": ["FOOD_PROCESSING", "TEXTILE"], "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [{"field": "business_category", "reason": "CATEGORY_NOT_ALLOWED", "actual": "CONSTRUCTION", "allowed": ["FOOD_PROCESSING", "TEXTILE"]}],
+        "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "18_stale_but_valid",
+      "description": "Rule is stale but still currently effective",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-018", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-06-01T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_STALE",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [], "missing_fields": [],
+        "warnings": ["USING_STALE_SCHEME_DATA"]
+      }
+    },
+    {
+      "id": "19_unknown_freshness",
+      "description": "last_verified_at is null",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-019", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": null
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE", "validity": "ACTIVE", "freshness": "UNKNOWN",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [], "missing_fields": [],
+        "warnings": ["UNKNOWN_FRESHNESS"]
+      }
+    },
+    {
+      "id": "20_no_cached_rule",
+      "description": "No scheme rules available",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": null,
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "INSUFFICIENT_SCHEME_DATA",
+        "validity": null,
+        "freshness": null,
+        "passed_rules": [], "failed_rules": [], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "21_specificity_selection",
+      "description": "Higher specificity rule is selected over generic rule",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": "RURAL", "business_category": "FOOD_PROCESSING" },
+      "rules": [
+        {
+          "id": "rule-021a", "scheme_id": "scheme-001", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        },
+        {
+          "id": "rule-021b", "scheme_id": "scheme-001", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": "RURAL", "allowed_business_categories": ["FOOD_PROCESSING"], "last_verified_at": "2026-09-20T10:00:00Z"
+        }
+      ],
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected_selected_rule_id": "rule-021b",
+      "expected_selection_reason": "HIGHEST_SPECIFICITY"
+    },
+    {
+      "id": "22_effective_from_selection",
+      "description": "Newer effective_from wins when specificity is equal",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "rules": [
+        {
+          "id": "rule-022a", "scheme_id": "scheme-001", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        },
+        {
+          "id": "rule-022b", "scheme_id": "scheme-001", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2025-06-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        }
+      ],
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected_selected_rule_id": "rule-022b",
+      "expected_selection_reason": "NEWEST_EFFECTIVE_FROM"
+    },
+    {
+      "id": "23_rule_version_selection",
+      "description": "Higher rule_version wins when specificity and effective_from are equal",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "rules": [
+        {
+          "id": "rule-023a", "scheme_id": "scheme-001", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        },
+        {
+          "id": "rule-023b", "scheme_id": "scheme-001", "rule_version": 3,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        }
+      ],
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected_selected_rule_id": "rule-023b",
+      "expected_selection_reason": "HIGHEST_RULE_VERSION"
+    },
+    {
+      "id": "24_uuid_tiebreak",
+      "description": "Lexicographically lowest UUID wins as final tie-break",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "rules": [
+        {
+          "id": "rule-024b", "scheme_id": "scheme-001", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        },
+        {
+          "id": "rule-024a", "scheme_id": "scheme-001", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        }
+      ],
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected_selected_rule_id": "rule-024a",
+      "expected_selection_reason": "UUID_TIE_BREAK"
+    },
+    {
+      "id": "25_two_compatible_schemes",
+      "description": "Two different schemes are both compatible",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "rules": [
+        {
+          "id": "rule-025a", "scheme_id": "scheme-A", "rule_version": 1,
+          "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        },
+        {
+          "id": "rule-025b", "scheme_id": "scheme-B", "rule_version": 1,
+          "min_project_cost": 50000.00, "max_project_cost": 500000.00, "max_loan_amount": 250000.00,
+          "active": true, "effective_from": "2024-01-01", "effective_to": null,
+          "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+        }
+      ],
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected_compatible_scheme_ids": ["scheme-A", "scheme-B"]
+    },
+    {
+      "id": "26_failed_plus_missing",
+      "description": "Project cost fails AND location is missing — status is NOT_COMPATIBLE but missing_fields also populated",
+      "profile": { "project_cost": 5000.00, "requested_loan_amount": 4000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-026", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": "RURAL", "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "NOT_COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "loan_amount"],
+        "failed_rules": [{"field": "project_cost", "reason": "BELOW_MINIMUM", "actual": 5000.00, "allowed_min": 10000.00}],
+        "missing_fields": ["location_type"],
+        "warnings": []
+      }
+    },
+    {
+      "id": "27_exact_decimal_boundary",
+      "description": "Exact decimal boundary — 140000.00 matches max 140000.00",
+      "profile": { "project_cost": 140000.00, "requested_loan_amount": 125000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-027", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 140000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [], "missing_fields": [], "warnings": []
+      }
+    },
+    {
+      "id": "28_null_effective_to",
+      "description": "Null effective_to — open-ended rule",
+      "profile": { "project_cost": 100000.00, "requested_loan_amount": 80000.00, "location_type": null, "business_category": null },
+      "scheme_rule": {
+        "id": "rule-028", "scheme_id": "scheme-001", "rule_version": 1,
+        "min_project_cost": 10000.00, "max_project_cost": 200000.00, "max_loan_amount": 125000.00,
+        "active": true, "effective_from": "2024-01-01", "effective_to": null,
+        "location_type": null, "allowed_business_categories": null, "last_verified_at": "2026-09-20T10:00:00Z"
+      },
+      "evaluation_date": "2026-09-22",
+      "freshness_policy": { "stale_after_hours": 720 },
+      "expected": {
+        "status": "COMPATIBLE", "validity": "ACTIVE", "freshness": "VERIFIED_FRESH",
+        "passed_rules": ["active_status", "effective_dates", "project_cost_range", "loan_amount"],
+        "failed_rules": [], "missing_fields": [], "warnings": []
+      }
+    }
+  ]
+}

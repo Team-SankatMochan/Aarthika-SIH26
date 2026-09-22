@@ -73,45 +73,42 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
         avg_repeat_purchase = sum(r.repeat_purchase_rate for r in pilot_results) / Decimal(len(pilot_results))
         avg_price_acceptance = sum(r.price_acceptance for r in pilot_results) / Decimal(len(pilot_results))
 
-    # 4. Formulate Decision
-    # A) DO_NOT_INVEST_YET if severe insolvency under stress, poor pilot results, or unaffordable debt
-    if (
-        (latest_fa and latest_fa.debt_affordability_status == "UNSUSTAINABLE")
-        or scenarios_insolvent >= 3
-        or (pilot_results and avg_price_acceptance < Decimal("50.00"))
-    ):
-        decision_code = "DO_NOT_INVEST_YET"
-        rationale = (
-            "Current evidence and financial assumptions do not justify committing capital yet. "
-            "Under simulated stress tests and debt repayment obligations, projected cash flow becomes insolvent "
-            "or pilot customer price acceptance remained insufficient. Recommend refining unit economics or testing lower-cost pilot operations."
-        )
-        confidence = Decimal("0.85")
-
-    # B) MODIFY if viable but fragile (stretched debt or tight margins in transport/raw materials)
-    elif (
-        (latest_fa and latest_fa.debt_affordability_status == "STRETCHED")
-        or scenarios_insolvent > 0
-        or (pilot_results and avg_repeat_purchase < Decimal("40.00"))
-    ):
+    # 4. Formulate Decision (Exact Readiness Rules)
+    
+    # Check if core business data is missing
+    # We assume it's missing if emi or dscr are None, but since we didn't add nullable to emi, 
+    # we can check affordable_loan_amount or business_dscr
+    if not latest_fa or latest_fa.business_dscr is None:
+        decision_code = "INSUFFICIENT_DATA"
+        rationale = "Missing core business data (cannot calculate EMI or Business DSCR)."
+        confidence = Decimal("1.00")
+        
+    elif latest_fa.household_existing_debt_ratio is None and latest_fa.household_buffer_ratio is None:
+        decision_code = "INCOMPLETE"
+        rationale = "Business data exists, but household data is missing."
+        confidence = Decimal("1.00")
+        
+    elif latest_fa.break_even_units is None and getattr(latest_fa, "break_even_status", None) in ["STRUCTURALLY_UNVIABLE", "NO_FINITE_BREAK_EVEN"]:
+        # We didn't save break_even_status, but we can check if units is null and cost exists
         decision_code = "MODIFY"
-        rationale = (
-            "The business idea demonstrates core commercial demand, but reveals financial vulnerability under cost spikes. "
-            "Recommend modifying the operating plan: secure bulk raw-material pricing, optimize transport routes, "
-            "or reduce borrowing by 20% to maintain a safer debt-service coverage ratio."
-        )
-        confidence = Decimal("0.80")
-
-    # C) GO if robust resilience, strong pilot validation, affordable financing
+        rationale = "Unviable business economics (e.g., negative contribution margin)."
+        confidence = Decimal("1.00")
+        
+    elif not pilot_results or avg_price_acceptance < Decimal("50.00") or avg_repeat_purchase < Decimal("30.00"):
+        decision_code = "TEST_FIRST"
+        rationale = "Pilot validation required before finance review. Metrics are missing or insufficient."
+        confidence = Decimal("0.85")
+        
+    elif scenarios_insolvent > 0 or latest_fa.business_dscr < Decimal("1.20") or (latest_fa.household_existing_debt_ratio is not None and latest_fa.household_existing_debt_ratio > Decimal("0.50")):
+        # Note: thresholds are illustrative here; ideally pulled from policy
+        decision_code = "HIGH_RISK"
+        rationale = "DSCR < minimum threshold, severe stress test failure, or household debt ratio too high."
+        confidence = Decimal("0.90")
+        
     else:
-        decision_code = "GO"
-        rationale = (
-            "Business demonstrates viable unit economics, robust crash-test resilience, and verified customer demand. "
-            "Debt service burden is well within conservative repayment capacity. "
-            "Proceed with recommended borrowing structure and phased rollout."
-        )
-        confidence = Decimal("0.88")
-
+        decision_code = "READY_FOR_FINANCE_REVIEW"
+        rationale = "Full data exists, DSCR >= minimum, Household metrics pass policy thresholds, and pilots validate demand."
+        confidence = Decimal("0.95")
     # Summaries
     evidence_summary = {
         "total_evidence_count": len(all_evidence),

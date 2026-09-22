@@ -4,6 +4,7 @@ import type Location from './Location';
 import type Business from './Business';
 
 export default class MarketData extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'market_data';
     static associations = {
         locations: { type: 'belongs_to', key: 'location_id' },

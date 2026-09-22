@@ -3,10 +3,10 @@ from typing import List, Optional
 from decimal import Decimal
 from sqlalchemy import String, Numeric, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class Location(Base):
+class Location(Base, SyncableMixin):
     __tablename__ = "locations"
 
     id: Mapped[str] = mapped_column(
@@ -18,6 +18,8 @@ class Location(Base):
     village_or_city: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     latitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 7), nullable=True)
     longitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 7), nullable=True)
+    # P1: canonical location type for deterministic scheme matching (RURAL, URBAN, SEMI_URBAN)
+    location_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False

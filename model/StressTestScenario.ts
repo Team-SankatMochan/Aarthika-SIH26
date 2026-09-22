@@ -3,6 +3,7 @@ import { field, readonly, date, relation } from '@nozbe/watermelondb/decorators'
 import type StressTest from './StressTest';
 
 export default class StressTestScenario extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'stress_test_scenarios';
     static associations = {
         stress_tests: { type: 'belongs_to', key: 'stress_test_id' },

@@ -1,0 +1,284 @@
+[
+  {
+    "name": "standard EMI",
+    "inputs": {
+      "requested_loan_amount": 100000.00,
+      "annual_interest_rate_percent": 12.0,
+      "repayment_tenure_months": 12,
+      "moratorium_months": 0,
+      "moratorium_interest_method": "NONE"
+    },
+    "expected": {
+      "capitalized_principal": 100000.00,
+      "emi": 8884.88
+    },
+    "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS"
+  },
+  {
+    "name": "zero-interest EMI",
+    "inputs": {
+      "requested_loan_amount": 120000.00,
+      "annual_interest_rate_percent": 0.0,
+      "repayment_tenure_months": 12,
+      "moratorium_months": 0,
+      "moratorium_interest_method": "NONE"
+    },
+    "expected": {
+      "capitalized_principal": 120000.00,
+      "emi": 10000.00
+    },
+    "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS"
+  },
+  {
+    "name": "capitalized moratorium (SIMPLE)",
+    "inputs": {
+      "requested_loan_amount": 100000.00,
+      "annual_interest_rate_percent": 12.0,
+      "repayment_tenure_months": 12,
+      "moratorium_months": 6,
+      "moratorium_interest_method": "SIMPLE_CAPITALIZE"
+    },
+    "expected": {
+      "capitalized_principal": 106000.00,
+      "emi": 9417.97
+    },
+    "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS"
+  },
+  {
+    "name": "capitalized moratorium (COMPOUND)",
+    "inputs": {
+      "requested_loan_amount": 100000.00,
+      "annual_interest_rate_percent": 12.0,
+      "repayment_tenure_months": 12,
+      "moratorium_months": 6,
+      "moratorium_interest_method": "COMPOUND_CAPITALIZE"
+    },
+    "expected": {
+      "capitalized_principal": 106152.02,
+      "emi": 9431.48
+    },
+    "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS"
+  },
+  {
+    "name": "inverse EMI",
+    "inputs": {
+      "maximum_affordable_emi": 5000.00,
+      "annual_interest_rate_percent": 12.0,
+      "repayment_tenure_months": 24,
+      "moratorium_months": 0,
+      "moratorium_interest_method": "NONE"
+    },
+    "expected": {
+      "affordable_loan_amount": 106216.94
+    },
+    "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS"
+  },
+  {
+    "name": "requested loan above scheme maximum",
+    "inputs": {
+      "requested_loan_amount": 500000.00,
+      "maximum_scheme_loan_amount": 125000.00,
+      "affordable_loan_amount": 200000.00
+    },
+    "expected": {
+      "recommended_loan_amount": 125000.00
+    }
+  },
+  {
+    "name": "requested loan above affordable amount",
+    "inputs": {
+      "requested_loan_amount": 500000.00,
+      "maximum_scheme_loan_amount": 1000000.00,
+      "affordable_loan_amount": 200000.00
+    },
+    "expected": {
+      "recommended_loan_amount": 200000.00
+    }
+  },
+  {
+    "name": "zero contribution margin",
+    "inputs": {
+      "selling_price_per_unit": 50.00,
+      "variable_cost_per_unit": 50.00,
+      "monthly_fixed_cost": 5000.00
+    },
+    "expected": {
+      "unit_contribution_margin": 0.00,
+      "break_even_units": null,
+      "break_even_status": "NO_FINITE_BREAK_EVEN"
+    }
+  },
+  {
+    "name": "negative contribution margin",
+    "inputs": {
+      "selling_price_per_unit": 40.00,
+      "variable_cost_per_unit": 50.00,
+      "monthly_fixed_cost": 5000.00
+    },
+    "expected": {
+      "unit_contribution_margin": -10.00,
+      "break_even_units": null,
+      "break_even_status": "STRUCTURALLY_UNVIABLE"
+    }
+  },
+  {
+    "name": "zero household income",
+    "inputs": {
+      "monthly_household_nonbusiness_income": 0.00,
+      "monthly_household_essential_expenses": 5000.00,
+      "existing_monthly_household_debt_payments": 1000.00
+    },
+    "expected": {
+      "household_free_cash": -6000.00,
+      "household_existing_debt_ratio": null,
+      "household_buffer_ratio": null,
+      "household_income_status": "ZERO_INCOME",
+      "household_affordability_status": "HIGH_RISK"
+    }
+  },
+  {
+    "name": "household existing debt",
+    "inputs": {
+      "monthly_household_nonbusiness_income": 20000.00,
+      "monthly_household_essential_expenses": 10000.00,
+      "existing_monthly_household_debt_payments": 5000.00
+    },
+    "expected": {
+      "household_free_cash": 5000.00,
+      "household_existing_debt_ratio": 0.25,
+      "household_buffer_ratio": 0.25,
+      "household_income_status": "VALID"
+    },
+    "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS"
+  },
+  {
+    "name": "post-loan household burden",
+    "inputs": {
+      "monthly_household_nonbusiness_income": 20000.00,
+      "existing_monthly_household_debt_payments": 5000.00,
+      "candidate_emi": 4000.00
+    },
+    "expected": {
+      "post_loan_monthly_debt_payments": 9000.00,
+      "post_loan_household_debt_ratio": 0.45
+    },
+    "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS"
+  },
+  {
+    "name": "business viable / household unsafe",
+    "inputs": {
+      "business_dscr": 1.5,
+      "minimum_required_dscr": 1.25,
+      "post_loan_household_debt_ratio": 0.60,
+      "maximum_household_debt_ratio": 0.50
+    },
+    "expected": {
+      "business_affordability_status": "READY_FOR_FINANCE_REVIEW",
+      "household_affordability_status": "HIGH_RISK",
+      "overall_readiness": "HIGH_RISK"
+    }
+  },
+  {
+    "name": "business unsafe / household safe",
+    "inputs": {
+      "business_dscr": 1.1,
+      "minimum_required_dscr": 1.25,
+      "post_loan_household_debt_ratio": 0.20,
+      "maximum_household_debt_ratio": 0.50
+    },
+    "expected": {
+      "business_affordability_status": "HIGH_RISK",
+      "household_affordability_status": "READY_FOR_FINANCE_REVIEW",
+      "overall_readiness": "HIGH_RISK"
+    }
+  },
+  {
+    "name": "missing loan terms",
+    "inputs": {
+      "requested_loan_amount": 100000.00,
+      "repayment_tenure_months": null,
+      "annual_interest_rate_percent": null,
+      "monthly_cash_available_for_debt_service": 5000.00
+    },
+    "expected": {
+      "loan_structure_status": "INSUFFICIENT_DATA",
+      "business_affordability_status": "INSUFFICIENT_DATA",
+      "missing_fields": [
+        "repayment_tenure_months",
+        "annual_interest_rate_percent"
+      ]
+    }
+  },
+  {
+    "name": "missing household fields",
+    "inputs": {
+      "business_economics_status": "BUSINESS_ECONOMICS_READY",
+      "loan_structure_status": "LOAN_STRUCTURE_READY",
+      "business_affordability_status": "READY_FOR_FINANCE_REVIEW",
+      "monthly_household_nonbusiness_income": null
+    },
+    "expected": {
+      "household_affordability_status": "INSUFFICIENT_DATA",
+      "overall_readiness": "INCOMPLETE",
+      "missing_fields": [
+        "monthly_household_nonbusiness_income"
+      ]
+    }
+  },
+  {
+    "name": "20% demand shock",
+    "inputs": {
+      "monthly_units_sold": 1000,
+      "selling_price_per_unit": 10.00,
+      "variable_cost_per_unit": 4.00,
+      "monthly_fixed_cost": 3000.00,
+      "scenario": "DEMAND_DROP_20"
+    },
+    "expected": {
+      "simulated_monthly_units_sold": 800,
+      "simulated_monthly_revenue": 8000.00,
+      "simulated_monthly_variable_cost": 3200.00,
+      "simulated_monthly_fixed_cost": 3000.00,
+      "simulated_monthly_operating_surplus": 1800.00
+    }
+  },
+  {
+    "name": "20% variable-cost increase",
+    "inputs": {
+      "monthly_units_sold": 1000,
+      "selling_price_per_unit": 10.00,
+      "variable_cost_per_unit": 4.00,
+      "monthly_fixed_cost": 3000.00,
+      "scenario": "RAW_MATERIAL_UP_20"
+    },
+    "expected": {
+      "simulated_monthly_units_sold": 1000,
+      "simulated_monthly_revenue": 10000.00,
+      "simulated_variable_cost_per_unit": 4.80,
+      "simulated_monthly_variable_cost": 4800.00,
+      "simulated_monthly_fixed_cost": 3000.00,
+      "simulated_monthly_operating_surplus": 2200.00
+    }
+  },
+  {
+    "name": "transport-cost shock",
+    "inputs": {
+      "monthly_units_sold": 1000,
+      "selling_price_per_unit": 10.00,
+      "variable_cost_per_unit": 4.00,
+      "monthly_labour_cost": 1000.00,
+      "monthly_rent": 1000.00,
+      "monthly_transport_cost": 500.00,
+      "monthly_other_fixed_cost": 500.00,
+      "scenario": "TRANSPORT_COST_SPIKE_50"
+    },
+    "expected": {
+      "simulated_monthly_units_sold": 1000,
+      "simulated_monthly_revenue": 10000.00,
+      "simulated_monthly_variable_cost": 4000.00,
+      "simulated_monthly_transport_cost": 750.00,
+      "simulated_monthly_fixed_cost": 3250.00,
+      "simulated_monthly_operating_surplus": 2750.00
+    }
+  }
+]

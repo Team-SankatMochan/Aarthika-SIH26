@@ -4,6 +4,7 @@ import type Business from './Business';
 import type PilotResult from './PilotResult';
 
 export default class Pilot extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'pilots';
     static associations = {
         businesses: { type: 'belongs_to', key: 'business_id' },

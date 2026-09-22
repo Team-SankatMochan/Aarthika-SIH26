@@ -6,6 +6,7 @@ from app.models.stress_test import StressTest, StressTestScenario
 from app.models.business_assumption import BusinessAssumption
 from app.models.finance_assessment import FinanceAssessment
 from app.schemas.stress_test import StressTestRunRequest
+from app.services.legacy_adapters import normalize_legacy_business_assumption
 
 TWO_PLACES = Decimal("0.01")
 
@@ -40,6 +41,8 @@ def run_stress_test_for_business(
     if not assumption:
         raise ValueError(f"No business assumptions found for business_id {business_id}")
 
+    normalized = normalize_legacy_business_assumption(assumption)
+    
     # 2. Fetch monthly EMI from finance assessment or request
     monthly_emi = request.monthly_emi
     if monthly_emi is None:
@@ -48,31 +51,23 @@ def run_stress_test_for_business(
             .where(FinanceAssessment.business_id == business_id)
             .order_by(desc(FinanceAssessment.created_at))
         ).first()
-        monthly_emi = latest_fa.emi if latest_fa else Decimal("3500.00")
+        monthly_emi = latest_fa.emi if latest_fa and latest_fa.emi is not None else None
+
+    if monthly_emi is None:
+        raise ValueError("INSUFFICIENT_DATA: Missing required Finance Assessment EMI.")
 
     # 3. Base monthly metrics
-    # Daily production volume * 30 or customers * price * 30
-    if assumption.production_volume > Decimal("0.00"):
-        base_monthly_vol = assumption.production_volume * Decimal("30")
-    else:
-        base_monthly_vol = Decimal(assumption.expected_customers) * Decimal("30")
-
-    base_price = assumption.selling_price
+    base_monthly_vol = Decimal(str(normalized["monthly_units_sold"]))
+    base_price = Decimal(str(normalized["selling_price_per_unit"]))
+    base_raw_mat_unit = Decimal(str(normalized["variable_cost_per_unit"]))
+    base_fixed_costs = Decimal(str(normalized["monthly_fixed_cost"]))
+    
     base_revenue = round_cur(base_monthly_vol * base_price)
-    base_raw_mat = round_cur(
-        assumption.raw_material_cost * Decimal("30")
-        if assumption.raw_material_cost < Decimal("1000")
-        else assumption.raw_material_cost
-    )
-    base_fixed_costs = round_cur(
-        assumption.labour_cost
-        + assumption.rent
-        + assumption.transport_cost
-        + assumption.other_operating_cost
-    )
+    base_raw_mat = round_cur(base_raw_mat_unit * base_monthly_vol)
+    
     base_operating_cost = round_cur(base_raw_mat + base_fixed_costs)
     base_surplus = round_cur(base_revenue - base_operating_cost)
-    base_working_cap = assumption.working_capital or Decimal("15000.00")
+    base_working_cap = Decimal(str(assumption.working_capital_required if assumption.working_capital_required is not None else (assumption.working_capital or 15000)))
 
     # 4. Create StressTest record
     stress_test = StressTest(
@@ -92,8 +87,8 @@ def run_stress_test_for_business(
             "pct": Decimal("-20.00"),
             "vol_factor": Decimal("0.80"),
             "price_factor": Decimal("1.00"),
-            "raw_mat_factor": Decimal("0.80"),
-            "transport_factor": Decimal("1.00"),
+            "raw_mat_factor": Decimal("1.00"),  # applies to unit or scaled vol
+            "fixed_cost_factor": Decimal("1.00"),
             "wc_factor": Decimal("1.10"),
         },
         "PRICE_DROP_10": {
@@ -102,7 +97,7 @@ def run_stress_test_for_business(
             "vol_factor": Decimal("1.00"),
             "price_factor": Decimal("0.90"),
             "raw_mat_factor": Decimal("1.00"),
-            "transport_factor": Decimal("1.00"),
+            "fixed_cost_factor": Decimal("1.00"),
             "wc_factor": Decimal("1.05"),
         },
         "RAW_MATERIAL_UP_20": {
@@ -111,7 +106,7 @@ def run_stress_test_for_business(
             "vol_factor": Decimal("1.00"),
             "price_factor": Decimal("1.00"),
             "raw_mat_factor": Decimal("1.20"),
-            "transport_factor": Decimal("1.00"),
+            "fixed_cost_factor": Decimal("1.00"),
             "wc_factor": Decimal("1.25"),
         },
         "LOST_MAJOR_CUSTOMER": {
@@ -119,8 +114,8 @@ def run_stress_test_for_business(
             "pct": Decimal("-25.00"),
             "vol_factor": Decimal("0.75"),
             "price_factor": Decimal("1.00"),
-            "raw_mat_factor": Decimal("0.75"),
-            "transport_factor": Decimal("0.90"),
+            "raw_mat_factor": Decimal("1.00"),
+            "fixed_cost_factor": Decimal("1.00"),
             "wc_factor": Decimal("1.20"),
         },
         "TRANSPORT_COST_SPIKE": {
@@ -129,7 +124,7 @@ def run_stress_test_for_business(
             "vol_factor": Decimal("1.00"),
             "price_factor": Decimal("1.00"),
             "raw_mat_factor": Decimal("1.00"),
-            "transport_factor": Decimal("1.50"),
+            "fixed_cost_factor": Decimal("1.20"), # simplified approximation for the shock
             "wc_factor": Decimal("1.15"),
         },
         "SEASONAL_DEMAND_DROP": {
@@ -170,10 +165,8 @@ def run_stress_test_for_business(
 
         sim_revenue = round_cur(base_monthly_vol * cfg["vol_factor"] * (base_price * cfg["price_factor"]))
         sim_raw_mat = round_cur(base_raw_mat * cfg["raw_mat_factor"])
-        sim_transport = round_cur(assumption.transport_cost * cfg["transport_factor"])
-        sim_fixed = round_cur(
-            assumption.labour_cost + assumption.rent + sim_transport + assumption.other_operating_cost
-        )
+        sim_fixed = round_cur(base_fixed_costs * cfg.get("fixed_cost_factor", Decimal("1.00")))
+        
         sim_operating_cost = round_cur(sim_raw_mat + sim_fixed)
         sim_cash_surplus = round_cur(sim_revenue - sim_operating_cost)
         sim_wc_pressure = round_cur(base_working_cap * cfg["wc_factor"])

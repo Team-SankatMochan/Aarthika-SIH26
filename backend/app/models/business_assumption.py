@@ -3,10 +3,10 @@ from typing import List, Optional
 from decimal import Decimal
 from sqlalchemy import String, Numeric, Integer, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class BusinessAssumption(Base):
+class BusinessAssumption(Base, SyncableMixin):
     __tablename__ = "business_assumptions"
 
     id: Mapped[str] = mapped_column(
@@ -43,6 +43,24 @@ class BusinessAssumption(Base):
     other_operating_cost: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), default=Decimal("0.00"), nullable=False
     )
+    
+    # --- New Canonical Fields ---
+    monthly_units_sold: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    unit_of_measure: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    selling_price_per_unit: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    variable_cost_per_unit: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    monthly_labour_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    monthly_rent: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    monthly_transport_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    monthly_other_fixed_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    requested_loan_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    working_capital_required: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+
+    # --- Household Finance Fields ---
+    monthly_household_nonbusiness_income: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    monthly_household_essential_expenses: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    existing_monthly_household_debt_payments: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+
     assumption_source: Mapped[str] = mapped_column(
         String(100), default="ENTREPRENEUR", nullable=False
     )

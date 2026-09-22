@@ -1489,17 +1489,34 @@ function RiskTestScreen() {
     const salesPerMonth = business?.salesPerMonth || 1800;
     const personalCost = business?.personalCost || 8000;
 
-    const monthlyRevenue = salesPerMonth * pricePerUnit;
-    const monthlyVariableCost = salesPerMonth * costPerUnit;
-    const monthlyGrossProfit = monthlyRevenue - monthlyVariableCost;
-    const monthlyNetProfit = monthlyGrossProfit - monthlyFixed - personalCost;
-    const breakEvenRevenue = monthlyFixed + personalCost + monthlyVariableCost;
+    // Use Canonical Engine
+    const inputs = {
+      requested_loan_amount: setupCost * 0.5,
+      maximum_scheme_loan_amount: 99999999,
+      annual_interest_rate_percent: 12,
+      repayment_tenure_months: 24,
+      moratorium_months: 0,
+      monthly_units_sold: salesPerMonth,
+      selling_price_per_unit: pricePerUnit,
+      variable_cost_per_unit: costPerUnit,
+      monthly_fixed_cost: monthlyFixed,
+      monthly_household_nonbusiness_income: 0,
+      monthly_household_essential_expenses: personalCost,
+      existing_monthly_household_debt_payments: 0
+    };
+    
+    // @ts-ignore
+    const { calculateFinancialAssessment } = require('../../engine/financeCalculator');
+    const result = calculateFinancialAssessment(inputs, { minimum_business_dscr: 1.2, maximum_household_debt_ratio: 0.5 });
+
+    const monthlyRevenue = result.monthly_revenue || 0;
+    const monthlyVariableCost = result.monthly_variable_cost || 0;
+    const monthlyNetProfit = result.business_cash_available_for_debt_service || 0;
+    const breakEvenRevenue = result.break_even_units ? result.break_even_units * pricePerUnit : 0;
     const safetyMargin = monthlyRevenue - breakEvenRevenue;
+    const safetyMarginPct = monthlyRevenue > 0 ? (safetyMargin / monthlyRevenue) * 100 : 45;
     const loanAmount = setupCost * 0.5;
-    const monthlyInterestRate = 0.12 / 12;
-    const loanEMI =
-      loanAmount * (monthlyInterestRate * Math.pow(1 + monthlyInterestRate, 24)) /
-        (Math.pow(1 + monthlyInterestRate, 24) - 1) || 0;
+    const loanEMI = result.emi || 0;
 
     const decisionMap: any = {
       GO: 'GO',

@@ -5,6 +5,7 @@ import type BusinessAssumption from './BusinessAssumption';
 import type StressTestScenario from './StressTestScenario';
 
 export default class StressTest extends Model {
+    @field('server_revision') serverRevision!: number;
     static table = 'stress_tests';
     static associations = {
         businesses: { type: 'belongs_to', key: 'business_id' },

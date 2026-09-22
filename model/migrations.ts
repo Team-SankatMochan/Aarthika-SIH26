@@ -2,6 +2,45 @@ import { schemaMigrations, createTable, addColumns } from '@nozbe/watermelondb/S
 
 export default schemaMigrations({
     migrations: [
+        // Migration from v2 to v3 - Add Phase 2 P1 fields
+        {
+            toVersion: 3,
+            steps: [
+                addColumns({
+                    table: 'locations',
+                    columns: [
+                        { name: 'location_type', type: 'string', isOptional: true },
+                    ],
+                }),
+                addColumns({
+                    table: 'schemes',
+                    columns: [
+                        { name: 'official_source_name', type: 'string', isOptional: true },
+                        { name: 'official_source_url', type: 'string', isOptional: true },
+                        { name: 'last_verified_at', type: 'number', isOptional: true },
+                    ],
+                }),
+                addColumns({
+                    table: 'scheme_rules',
+                    columns: [
+                        { name: 'rule_version', type: 'number' },
+                        { name: 'moratorium_interest_method', type: 'string' },
+                        { name: 'location_type', type: 'string', isOptional: true },
+                        { name: 'allowed_business_categories', type: 'string', isOptional: true },
+                        { name: 'source_name', type: 'string', isOptional: true },
+                        { name: 'source_url', type: 'string', isOptional: true },
+                        { name: 'last_verified_at', type: 'number', isOptional: true },
+                    ],
+                }),
+                addColumns({
+                    table: 'finance_assessments',
+                    columns: [
+                        { name: 'scheme_rule_version', type: 'number', isOptional: true },
+                        { name: 'scheme_last_verified_at', type: 'number', isOptional: true },
+                    ],
+                }),
+            ],
+        },
         // Migration from v1 to v2 - Add Phase 2 tables
         {
             toVersion: 2,
@@ -17,7 +56,9 @@ export default schemaMigrations({
                         { name: 'latitude', type: 'number', isOptional: true },
                         { name: 'longitude', type: 'number', isOptional: true },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -34,7 +75,9 @@ export default schemaMigrations({
                         { name: 'preferences', type: 'string', isOptional: true },
                         { name: 'risk_tolerance', type: 'string', isOptional: true },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -47,7 +90,9 @@ export default schemaMigrations({
                         { name: 'description', type: 'string', isOptional: true },
                         { name: 'status', type: 'string' },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 // Add remaining tables
@@ -66,6 +111,7 @@ export default schemaMigrations({
                         { name: 'is_estimated', type: 'boolean' },
                         { name: 'metadata_json', type: 'string', isOptional: true },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -85,7 +131,9 @@ export default schemaMigrations({
                         { name: 'assumption_source', type: 'string' },
                         { name: 'confidence', type: 'number', isOptional: true },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -97,7 +145,9 @@ export default schemaMigrations({
                         { name: 'description', type: 'string', isOptional: true },
                         { name: 'status', type: 'string' },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -117,6 +167,7 @@ export default schemaMigrations({
                         { name: 'resilience_score', type: 'number', isOptional: true },
                         { name: 'result_status', type: 'string' },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -130,7 +181,9 @@ export default schemaMigrations({
                         { name: 'start_date', type: 'number', isOptional: true },
                         { name: 'end_date', type: 'number', isOptional: true },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -148,6 +201,7 @@ export default schemaMigrations({
                         { name: 'customer_feedback', type: 'string', isOptional: true },
                         { name: 'observations', type: 'string', isOptional: true },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -158,7 +212,9 @@ export default schemaMigrations({
                         { name: 'description', type: 'string', isOptional: true },
                         { name: 'active', type: 'boolean' },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -176,7 +232,9 @@ export default schemaMigrations({
                         { name: 'effective_to', type: 'number', isOptional: true },
                         { name: 'active', type: 'boolean' },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -201,6 +259,7 @@ export default schemaMigrations({
                         { name: 'working_capital_requirement', type: 'number' },
                         { name: 'calculation_version', type: 'number' },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -215,6 +274,7 @@ export default schemaMigrations({
                         { name: 'is_observed', type: 'boolean' },
                         { name: 'is_estimated', type: 'boolean' },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
                 createTable({
@@ -228,6 +288,7 @@ export default schemaMigrations({
                         { name: 'assumptions_summary', type: 'string', isOptional: true },
                         { name: 'financial_risk_summary', type: 'string', isOptional: true },
                         { name: 'created_at', type: 'number' },
+                        { name: 'server_revision', type: 'number', isOptional: true },
                     ],
                 }),
             ],

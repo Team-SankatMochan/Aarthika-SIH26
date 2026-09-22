@@ -1,0 +1,9 @@
+{
+  "policy_version": "policy-2026-v1",
+  "minimum_required_dscr": 1.25,
+  "maximum_household_debt_ratio": 0.50,
+  "minimum_household_buffer_ratio": 0.10,
+  "rounding_policy": "ROUND_HALF_UP_TO_2_DECIMALS",
+  "unit_rounding_policy": "ROUND_UP_TO_INTEGER",
+  "days_in_month_assumption": 30
+}

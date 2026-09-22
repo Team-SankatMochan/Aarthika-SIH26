@@ -9,28 +9,30 @@ class TableChanges(BaseModel):
 
 
 class SyncRequest(BaseModel):
+    sync_request_id: str = Field(description="UUID for push idempotency")
     changes: Dict[str, TableChanges] = Field(
         default_factory=dict,
         examples=[
             {
                 "users": {"created": [], "updated": [], "deleted": []},
-                "locations": {"created": [], "updated": [], "deleted": []},
-                "businesses": {"created": [], "updated": [], "deleted": []},
-                "business_assumptions": {"created": [], "updated": [], "deleted": []},
-                "market_data": {"created": [], "updated": [], "deleted": []},
-                "stress_tests": {"created": [], "updated": [], "deleted": []},
-                "stress_test_scenarios": {"created": [], "updated": [], "deleted": []},
-                "pilots": {"created": [], "updated": [], "deleted": []},
-                "pilot_results": {"created": [], "updated": [], "deleted": []},
-                "evidence": {"created": [], "updated": [], "deleted": []},
             }
         ],
     )
-    lastPulledAt: Optional[int] = Field(None, examples=[1724920000000])
+    lastPulledAt: Optional[int] = Field(None, description="Treated as last_server_revision")
+
+
+class SyncConflict(BaseModel):
+    type: str = "SYNC_CONFLICT"
+    table: str
+    record_id: str
+    client_base_revision: Optional[int]
+    server_revision: int
+    server_record: Dict[str, Any]
 
 
 class SyncResponse(BaseModel):
     changes: Dict[str, TableChanges] = Field(default_factory=dict)
-    timestamp: int
+    timestamp: int = Field(description="The authoritative server revision cursor (snapshot_upper_bound)")
     status: str = "success"
     records_processed: int = 0
+    conflicts: List[SyncConflict] = Field(default_factory=list)

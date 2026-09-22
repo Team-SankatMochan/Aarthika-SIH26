@@ -3,10 +3,10 @@ from typing import Optional, Any
 from decimal import Decimal
 from sqlalchemy import String, Numeric, Boolean, Date, DateTime, ForeignKey, JSON, Index, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base, generate_uuid_str, utc_now
+from app.db.base import Base, SyncableMixin, generate_uuid_str, utc_now
 
 
-class MarketData(Base):
+class MarketData(Base, SyncableMixin):
     __tablename__ = "market_data"
 
     id: Mapped[str] = mapped_column(
