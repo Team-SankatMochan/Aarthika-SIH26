@@ -73,11 +73,25 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
         avg_repeat_purchase = sum(r.repeat_purchase_rate for r in pilot_results) / Decimal(len(pilot_results))
         avg_price_acceptance = sum(r.price_acceptance for r in pilot_results) / Decimal(len(pilot_results))
 
+    # Load Policy centrally
+    import os
+    import json
+    policy_path = os.path.join(os.path.dirname(__file__), "../../../finance-spec/calculation-policy.json")
+    if not os.path.exists(policy_path):
+        raise RuntimeError("CRITICAL: calculation-policy.json not found")
+        
+    try:
+        with open(policy_path, "r") as f:
+            policy = json.load(f)
+    except Exception as e:
+        raise RuntimeError(f"CRITICAL: failed to parse calculation-policy.json: {str(e)}")
+
+    min_dscr = Decimal(str(policy.get("minimum_required_dscr", "1.20")))
+    max_hh_debt = Decimal(str(policy.get("maximum_household_debt_ratio", "0.50")))
+
     # 4. Formulate Decision (Exact Readiness Rules)
     
     # Check if core business data is missing
-    # We assume it's missing if emi or dscr are None, but since we didn't add nullable to emi, 
-    # we can check affordable_loan_amount or business_dscr
     if not latest_fa or latest_fa.business_dscr is None:
         decision_code = "INSUFFICIENT_DATA"
         rationale = "Missing core business data (cannot calculate EMI or Business DSCR)."
@@ -89,7 +103,6 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
         confidence = Decimal("1.00")
         
     elif latest_fa.break_even_units is None and getattr(latest_fa, "break_even_status", None) in ["STRUCTURALLY_UNVIABLE", "NO_FINITE_BREAK_EVEN"]:
-        # We didn't save break_even_status, but we can check if units is null and cost exists
         decision_code = "MODIFY"
         rationale = "Unviable business economics (e.g., negative contribution margin)."
         confidence = Decimal("1.00")
@@ -99,8 +112,7 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
         rationale = "Pilot validation required before finance review. Metrics are missing or insufficient."
         confidence = Decimal("1.00")
         
-    elif scenarios_insolvent > 0 or latest_fa.business_dscr < Decimal("1.20") or (latest_fa.household_existing_debt_ratio is not None and latest_fa.household_existing_debt_ratio > Decimal("0.50")):
-        # Note: thresholds are illustrative here; ideally pulled from policy
+    elif scenarios_insolvent > 0 or latest_fa.business_dscr < min_dscr or (latest_fa.household_existing_debt_ratio is not None and latest_fa.household_existing_debt_ratio > max_hh_debt):
         decision_code = "HIGH_RISK"
         rationale = "DSCR < minimum threshold, severe stress test failure, or household debt ratio too high."
         confidence = Decimal("1.00")

@@ -405,16 +405,13 @@ function MobileHeader() {
         <Image source={APP_LOGO} style={styles.logoImage} resizeMode="contain" />
       </Pressable>
 
-      
-      </View>
-
-      <View style={styles.switchAuthContainer}>
-        <Text style={styles.switchAuthText}>{t('new_to_aarthika') || 'New to Aarthika? '}</Text>
-        <TouchableOpacity onPress={() => navigateTo('signup')}>
-          <Text style={styles.switchAuthLink}>{t('create_account_link') || 'Create an account'}</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+      <TouchableOpacity
+        style={styles.langSelectorBadge}
+        onPress={() => setIsLangModalOpen(true)}
+      >
+        <Text style={styles.langSelectorBadgeText}>{langNames[currentLang] || 'English'} ▼</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 

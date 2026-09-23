@@ -201,10 +201,29 @@ def test_sync_matrix_15_idempotency_retry(db_session):
     u_count1 = len(db_session.scalars(select(User).where(User.id == uid)).all())
     assert u_count1 == 1
     
-    # Retry exactly same
+    # Retry exactly same payload
     process_sync_request(sync_req, db_session)
     u_count2 = len(db_session.scalars(select(User).where(User.id == uid)).all())
     assert u_count2 == 1
+    
+    # Retry with different payload
+    sync_req_diff = SyncRequest(
+        sync_request_id=req_id,
+        changes={"users": TableChanges(created=[{"id": uid, "name": "B"}])}
+    )
+    with pytest.raises(ValueError, match="reused with different payload"):
+        process_sync_request(sync_req_diff, db_session)
+
+def test_sync_matrix_16_pull_only_no_idempotency_key(db_session):
+    req_id = mock_uuid()
+    sync_req = SyncRequest(
+        sync_request_id=req_id,
+        changes={},
+        lastPulledAt=0
+    )
+    process_sync_request(sync_req, db_session)
+    # Ensure idempotency record was NOT created
+    assert db_session.get(SyncRequestRecord, req_id) is None
 
 # Case 19: CREATE -> UPDATE coalesce
 def test_sync_matrix_19_create_update_coalesce(db_session):

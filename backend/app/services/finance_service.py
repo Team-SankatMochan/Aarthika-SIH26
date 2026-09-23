@@ -8,8 +8,9 @@ from app.models.scheme import Scheme, SchemeRule
 from app.models.business import Business
 from app.models.business_assumption import BusinessAssumption
 from app.models.finance_assessment import FinanceAssessment
+from app.models.location import Location
 from app.schemas.finance_assessment import FinanceAssessmentRequest
-from app.services.finance_calculator import calculate_financial_assessment
+from app.services.finance_calculator import calculate_financial_assessment, compute_input_hash
 from app.services.legacy_adapters import normalize_legacy_business_assumption
 from app.services.scheme_matcher import evaluate_scheme_compatibility, select_best_rule
 from datetime import date
@@ -35,6 +36,7 @@ def assess_business_finance(
         "monthly_transport_cost": request.monthly_transport_cost,
         "monthly_other_fixed_cost": request.monthly_other_fixed_cost,
         "requested_loan_amount": request.requested_loan_amount,
+        "project_cost": request.project_cost,
         "working_capital_required": request.working_capital_required,
         "monthly_household_nonbusiness_income": request.monthly_household_nonbusiness_income,
         "monthly_household_essential_expenses": request.monthly_household_essential_expenses,
@@ -54,46 +56,73 @@ def assess_business_finance(
             if inputs.get(k) is None:
                 inputs[k] = v
 
+    business = db.get(Business, business_id)
+    if not business:
+        raise ValueError(f"Business {business_id} not found")
+
     # Build profile for matcher
-    # We need project_cost = requested_loan_amount + margin_contribution? 
-    # Matcher uses "project_cost" and "requested_loan_amount". 
-    req_loan = inputs.get("requested_loan_amount")
     profile = {
-        "requested_loan_amount": req_loan,
-        "project_cost": req_loan, # Assuming project cost ~ requested loan for matching if margin missing
+        "requested_loan_amount": inputs.get("requested_loan_amount"),
+        "project_cost": inputs.get("project_cost"),
+        "business_category": business.business_category,
     }
     
-    # 2. Match Scheme Rule
+    if business.location_id:
+        location = db.get(Location, business.location_id)
+        if location:
+            profile["location_type"] = location.location_type
+
+    # 2. Load Policy (must exist, no magic fallback)
+    policy_path = os.path.join(os.path.dirname(__file__), "../../../finance-spec/calculation-policy.json")
+    if not os.path.exists(policy_path):
+        raise RuntimeError("CRITICAL: calculation-policy.json not found")
+        
+    try:
+        with open(policy_path, "r") as f:
+            policy = json.load(f)
+    except Exception as e:
+        raise RuntimeError(f"CRITICAL: failed to parse calculation-policy.json: {str(e)}")
+        
+    policy_version = policy.get("policy_version", "UNKNOWN")
+    engine_version = "1.0.0"
+
+    # 3. Match Scheme Rule (if SCHEME mode)
     final_rule = None
-    freshness_policy = {"stale_after_hours": 720}
     evaluation_date = date.today()
     
-    if request.scheme_rule_id:
-        rule = db.scalars(select(SchemeRule).where(SchemeRule.id == request.scheme_rule_id)).first()
-        if rule:
-            res = evaluate_scheme_compatibility(profile, rule.__dict__, evaluation_date, freshness_policy)
-            if res["status"] == "COMPATIBLE":
-                final_rule = rule
-    elif request.scheme_id:
-        rules = db.scalars(select(SchemeRule).where(SchemeRule.scheme_id == request.scheme_id)).all()
-        compatible = []
-        rules_by_id = {}
-        for r in rules:
-            rd = r.__dict__
-            rules_by_id[r.id] = rd
-            res = evaluate_scheme_compatibility(profile, rd, evaluation_date, freshness_policy)
-            if res["status"] == "COMPATIBLE":
-                compatible.append(res)
-        
-        if compatible:
-            best = select_best_rule(compatible, rules_by_id)
-            if best:
-                final_rule = next((r for r in rules if r.id == best["scheme_rule_id"]), None)
+    if request.financing_mode == "SCHEME":
+        if request.scheme_rule_id:
+            rule = db.scalars(select(SchemeRule).where(SchemeRule.id == request.scheme_rule_id)).first()
+            if rule:
+                res = evaluate_scheme_compatibility(profile, rule.__dict__, evaluation_date, policy)
+                if res["status"] == "COMPATIBLE":
+                    final_rule = rule
+        elif request.scheme_id:
+            rules = db.scalars(select(SchemeRule).where(SchemeRule.scheme_id == request.scheme_id)).all()
+            compatible = []
+            rules_by_id = {}
+            for r in rules:
+                rd = r.__dict__
+                rules_by_id[r.id] = rd
+                res = evaluate_scheme_compatibility(profile, rd, evaluation_date, policy)
+                if res["status"] == "COMPATIBLE":
+                    compatible.append(res)
+            
+            if compatible:
+                best = select_best_rule(compatible, rules_by_id)
+                if best:
+                    final_rule = next((r for r in rules if r.id == best["scheme_rule_id"]), None)
+                    
+        if final_rule is None and (request.scheme_rule_id or request.scheme_id):
+            # Requested scheme but no compatible rule found
+            raise ValueError("INSUFFICIENT_DATA or NOT_COMPATIBLE: No active compatible scheme rule found for the provided profile.")
 
     annual_rate = None
     total_tenure = None
     moratorium_months = None
     max_loan_cap = None
+    scheme_id = None
+    scheme_rule_id = None
     
     if final_rule:
         max_loan_cap = final_rule.max_loan_amount
@@ -102,11 +131,6 @@ def assess_business_finance(
         moratorium_months = final_rule.moratorium_months
         scheme_id = final_rule.scheme_id
         scheme_rule_id = final_rule.id
-    else:
-        # If no verified rule, must rely on explicit user-supplied terms or fail
-        scheme_id = None
-        scheme_rule_id = None
-        # Could take from explicit inputs if we allowed manual scenario
 
     if max_loan_cap is not None:
         inputs["maximum_scheme_loan_amount"] = max_loan_cap
@@ -121,19 +145,10 @@ def assess_business_finance(
         else:
             inputs["moratorium_interest_method"] = "NONE"
 
-    # 3. Load Policy
-    policy_path = os.path.join(os.path.dirname(__file__), "../../../finance-spec/calculation-policy.json")
-    try:
-        with open(policy_path, "r") as f:
-            policy = json.load(f)
-    except Exception:
-        policy = {
-            "minimum_required_dscr": 1.20,
-            "maximum_household_debt_ratio": 0.50
-        }
-
     # 4. Execute Deterministic Calculator
-    result = calculate_financial_assessment(inputs, policy)
+    # Force allow_stage_overrides=False for production
+    result = calculate_financial_assessment(inputs, policy, allow_stage_overrides=False)
+    input_hash = compute_input_hash(inputs, policy_version)
 
     # 5. Map Result back to DB Model
     latest_assessment = db.scalars(
@@ -150,21 +165,19 @@ def assess_business_finance(
     dscr = result.get("business_dscr")
     burden = Decimal("100.0") / dscr if dscr and dscr > 0 else Decimal("0.00")
     
-    # Fill in fallback required fields for DB schema compat
-    project_cost = inputs.get("requested_loan_amount", Decimal("0"))
-    margin_contribution = Decimal("0.00")
+    margin_contribution = None
 
     assessment = FinanceAssessment(
         business_id=business_id,
         scheme_id=scheme_id,
         scheme_rule_id=scheme_rule_id,
-        project_cost=project_cost,
+        project_cost=inputs.get("project_cost"),
         margin_contribution=margin_contribution,
-        maximum_loan=Decimal(str(result.get("maximum_scheme_loan_amount", "0"))),
+        maximum_loan=Decimal(str(result.get("maximum_scheme_loan_amount"))) if result.get("maximum_scheme_loan_amount") is not None else None,
         recommended_loan=Decimal(str(recommended_loan)) if recommended_loan is not None else None,
         annual_interest_rate=Decimal(str(annual_rate)) if annual_rate is not None else None,
         total_tenure_months=total_tenure,
-        moratorium_months=moratorium_months,
+        moratorium_months=moratorium_months if moratorium_months is not None else 0,
         active_repayment_months=inputs.get("repayment_tenure_months"),
         capitalized_principal=Decimal(str(cap_prin)) if cap_prin is not None else None,
         emi=Decimal(str(emi)) if emi is not None else None,
@@ -184,6 +197,10 @@ def assess_business_finance(
         debt_service_burden=round_currency(burden),
         working_capital_requirement=inputs.get("working_capital_required", Decimal("0")),
         calculation_version=next_version,
+        
+        policy_version=policy_version,
+        engine_version=engine_version,
+        input_hash=input_hash,
         
         scheme_rule_version=final_rule.rule_version if final_rule else None,
         scheme_last_verified_at=final_rule.last_verified_at if final_rule else None,

@@ -54,7 +54,7 @@ def calculate_golden_test_wrapper(inputs, policy):
         if units is not None:
             sim_outputs["simulated_monthly_units_sold"] = units
 
-    res = calculate_financial_assessment(inputs, policy)
+    res = calculate_financial_assessment(inputs, policy, allow_stage_overrides=True)
     
     if scenario:
         for k in ["monthly_revenue", "monthly_variable_cost", "monthly_fixed_cost", "monthly_operating_surplus"]:

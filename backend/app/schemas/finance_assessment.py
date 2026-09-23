@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class FinanceAssessmentRequest(BaseModel):
     scheme_id: Optional[str] = None
     scheme_rule_id: Optional[str] = None
+    financing_mode: str = Field(default="SCHEME")  # "SCHEME" or "MANUAL"
+    
+    project_cost: Optional[Decimal] = Field(None, ge=0)
     
     monthly_units_sold: Optional[Decimal] = Field(None, ge=0)
     selling_price_per_unit: Optional[Decimal] = Field(None, ge=0)

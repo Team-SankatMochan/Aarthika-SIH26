@@ -223,21 +223,24 @@ export default appSchema({
                 { name: 'business_id', type: 'string', isIndexed: true },
                 { name: 'scheme_id', type: 'string', isIndexed: true, isOptional: true },
                 { name: 'scheme_rule_id', type: 'string', isIndexed: true, isOptional: true },
-                { name: 'project_cost', type: 'number' },
-                { name: 'margin_contribution', type: 'number' },
-                { name: 'maximum_loan', type: 'number' },
-                { name: 'recommended_loan', type: 'number' },
-                { name: 'annual_interest_rate', type: 'number' },
-                { name: 'total_tenure_months', type: 'number' },
+                { name: 'project_cost', type: 'number', isOptional: true },
+                { name: 'margin_contribution', type: 'number', isOptional: true },
+                { name: 'maximum_loan', type: 'number', isOptional: true },
+                { name: 'recommended_loan', type: 'number', isOptional: true },
+                { name: 'annual_interest_rate', type: 'number', isOptional: true },
+                { name: 'total_tenure_months', type: 'number', isOptional: true },
                 { name: 'moratorium_months', type: 'number' },
-                { name: 'active_repayment_months', type: 'number' },
-                { name: 'capitalized_principal', type: 'number' },
-                { name: 'emi', type: 'number' },
-                { name: 'total_interest', type: 'number' },
+                { name: 'active_repayment_months', type: 'number', isOptional: true },
+                { name: 'capitalized_principal', type: 'number', isOptional: true },
+                { name: 'emi', type: 'number', isOptional: true },
+                { name: 'total_interest', type: 'number', isOptional: true },
                 { name: 'debt_affordability_status', type: 'string' },
                 { name: 'debt_service_burden', type: 'number' },
                 { name: 'working_capital_requirement', type: 'number' },
                 { name: 'calculation_version', type: 'number' },
+                { name: 'policy_version', type: 'string', isOptional: true },
+                { name: 'engine_version', type: 'string', isOptional: true },
+                { name: 'input_hash', type: 'string', isOptional: true },
                 { name: 'scheme_rule_version', type: 'number', isOptional: true }, // P1
                 { name: 'scheme_last_verified_at', type: 'number', isOptional: true }, // P1
                 { name: 'created_at', type: 'number' },
@@ -248,17 +251,30 @@ export default appSchema({
         // ─── Evidence & Decisions ──────────────────────────────────
 
         tableSchema({
-            
+            name: 'evidence',
+            columns: [
+                // Legacy fields (kept for migration compatibility)
+                { name: 'business_id', type: 'string', isIndexed: true },
+                { name: 'evidence_type', type: 'string', isOptional: true },
+                { name: 'source', type: 'string', isOptional: true },
+                { name: 'description', type: 'string', isOptional: true },
+                { name: 'value', type: 'number', isOptional: true },
+                { name: 'confidence', type: 'number', isOptional: true },
+                { name: 'is_observed', type: 'boolean', isOptional: true },
+                { name: 'is_estimated', type: 'boolean', isOptional: true },
+                // P2 Canonical provenance fields
                 { name: 'source_type', type: 'string', isOptional: true },
                 { name: 'provider_id', type: 'string', isOptional: true },
                 { name: 'provider_record_id', type: 'string', isOptional: true },
                 { name: 'source_name', type: 'string', isOptional: true },
                 { name: 'source_url', type: 'string', isOptional: true },
                 { name: 'metric_name', type: 'string', isOptional: true },
-                { name: 'numeric_value', type: 'string', isOptional: true },
+                { name: 'numeric_value', type: 'string', isOptional: true }, // Decimal as string
                 { name: 'text_value', type: 'string', isOptional: true },
                 { name: 'boolean_value', type: 'boolean', isOptional: true },
                 { name: 'observation_date', type: 'number', isOptional: true },
+                { name: 'reference_period_start', type: 'number', isOptional: true },
+                { name: 'reference_period_end', type: 'number', isOptional: true },
                 { name: 'retrieved_at', type: 'number', isOptional: true },
                 { name: 'state', type: 'string', isOptional: true },
                 { name: 'district', type: 'string', isOptional: true },
@@ -271,6 +287,9 @@ export default appSchema({
                 { name: 'content_hash', type: 'string', isOptional: true },
                 { name: 'derivation_type', type: 'string', isOptional: true },
                 { name: 'derivation_version', type: 'string', isOptional: true },
+                { name: 'parent_evidence_ids', type: 'string', isOptional: true }, // JSON string
+                { name: 'created_at', type: 'number' },
+                { name: 'server_revision', type: 'number', isOptional: true },
             ],
         }),
 
@@ -280,7 +299,7 @@ export default appSchema({
                 { name: 'business_id', type: 'string', isIndexed: true },
                 { name: 'decision', type: 'string' }, // GO, MODIFY, DO_NOT_INVEST_YET
                 { name: 'rationale', type: 'string' },
-                { name: 'confidence', type: 'number' },
+                { name: 'confidence', type: 'number', isOptional: true },
                 { name: 'evidence_summary', type: 'string', isOptional: true }, // JSON string
                 { name: 'assumptions_summary', type: 'string', isOptional: true }, // JSON string
                 { name: 'financial_risk_summary', type: 'string', isOptional: true }, // JSON string

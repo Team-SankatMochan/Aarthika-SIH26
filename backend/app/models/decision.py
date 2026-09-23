@@ -19,8 +19,8 @@ class Decision(Base, SyncableMixin):
         String(50), nullable=False, index=True
     )  # INSUFFICIENT_DATA, INCOMPLETE, TEST_FIRST, MODIFY, HIGH_RISK, READY_FOR_FINANCE_REVIEW
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
-    confidence: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2), default=Decimal("0.80"), nullable=False
+    confidence: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 2), nullable=True
     )
     evidence_summary: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     assumptions_summary: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)

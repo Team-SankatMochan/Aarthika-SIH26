@@ -1,6 +1,7 @@
 import time
 import json
 import logging
+import hashlib
 from datetime import datetime, timezone, date
 from decimal import Decimal
 from typing import Dict, Any, List, Optional, Set
@@ -96,33 +97,60 @@ def get_current_upper_bound(db: Session) -> int:
         from app.db.events import _sqlite_seq
         return _sqlite_seq
     val = db.scalar(global_sync_sequence.next_value())
-    # next_value() advances the sequence. We actually want the current value for upper bound?
-    # Or we can just use the value we just pulled as the upper bound for this sync request!
-    # Because any change committed later will grab a higher sequence number.
     return val
 
 
+def compute_payload_hash(sync_req: SyncRequest) -> Optional[str]:
+    # Custom serialization for TableChanges objects
+    changes_dict = {}
+    for table_name, table_changes in sync_req.changes.items():
+        # Exclude empty changes entirely
+        if table_changes.created or table_changes.updated or table_changes.deleted:
+            changes_dict[table_name] = table_changes.model_dump(exclude_unset=True)
+            
+    if not changes_dict:
+        return None
+        
+    serialized = json.dumps(changes_dict, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
+    payload_hash = compute_payload_hash(sync_req)
+    
     # 1. Check Idempotency
     existing_request = db.get(SyncRequestRecord, sync_req.sync_request_id)
     records_processed = 0
     conflicts: List[SyncConflict] = []
+    skip_mutations = False
     
-    if existing_request and existing_request.status == "SUCCESS":
-        # Request already processed, but we must return a valid pull response.
-        pass
+    if payload_hash is None:
+        # PULL ONLY
+        skip_mutations = True
     else:
         # PUSH Phase
-        if not existing_request:
-            req_record = SyncRequestRecord(
-                sync_request_id=sync_req.sync_request_id,
-                status="PENDING"
-            )
-            db.add(req_record)
+        if existing_request:
+            if existing_request.status == "SUCCESS":
+                if existing_request.payload_hash != payload_hash:
+                    raise ValueError(f"Sync request ID {sync_req.sync_request_id} reused with different payload.")
+                # Idempotent retry: do not re-apply
+                skip_mutations = True
+            else:
+                # Failed/Pending with same or different hash? If it failed, let's just retry.
+                pass
         else:
-            req_record = existing_request
-
+            # Create idempotency record
+            existing_request = SyncRequestRecord(
+                sync_request_id=sync_req.sync_request_id,
+                status="PENDING",
+                payload_hash=payload_hash
+            )
+            db.add(existing_request)
+            db.commit() # Save pending record so we have it
+            
+    if not skip_mutations:
         active_ids: Set[str] = set()
+        req_record = db.get(SyncRequestRecord, sync_req.sync_request_id)
 
         try:
             # 1. Deletions
@@ -163,8 +191,7 @@ def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
                         client_st = row_dict.get("source_type")
                         if client_st is not None and client_st != "" and client_st != "USER_ENTERED":
                             raise ValueError(
-                                f"Client cannot create evidence with non-user source_type '{client_st}'. "
-                                f"Only 'USER_ENTERED' is permitted."
+                                f"Client cannot create evidence with non-user source_type '{client_st}'."
                             )
                         row_dict["source_type"] = "USER_ENTERED"
 
@@ -176,10 +203,7 @@ def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
                         if table_name == "evidence":
                             source_type = getattr(existing, "source_type", None)
                             if source_type != "USER_ENTERED":
-                                raise ValueError(
-                                    f"Unauthorized UPDATE on evidence {entity_id}: client cannot mutate "
-                                    f"evidence with source_type '{source_type}'"
-                                )
+                                raise ValueError(f"Unauthorized UPDATE on evidence {entity_id}")
                         cleaned_data = sanitize_row_data(model_cls, row_dict)
                         for key, val in cleaned_data.items():
                             if key != "id":
@@ -209,10 +233,7 @@ def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
                         if table_name == "evidence":
                             client_st = row_dict.get("source_type")
                             if client_st is not None and client_st != "" and client_st != "USER_ENTERED":
-                                raise ValueError(
-                                    f"Client cannot create evidence with non-user source_type '{client_st}'. "
-                                    f"Only 'USER_ENTERED' is permitted."
-                                )
+                                raise ValueError(f"Client cannot create evidence with non-user source_type '{client_st}'.")
                             row_dict["source_type"] = "USER_ENTERED"
                         cleaned_data = sanitize_row_data(model_cls, row_dict)
                         new_instance = model_cls(**cleaned_data)
@@ -223,15 +244,10 @@ def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
                     if table_name == "evidence":
                         source_type = getattr(existing, "source_type", None)
                         if source_type != "USER_ENTERED":
-                            raise ValueError(
-                                f"Unauthorized UPDATE on evidence {entity_id}: client cannot mutate "
-                                f"evidence with source_type '{source_type}'"
-                            )
+                            raise ValueError(f"Unauthorized UPDATE on evidence {entity_id}")
                         client_st = row_dict.get("source_type")
                         if client_st is not None and client_st != "" and client_st != "USER_ENTERED":
-                            raise ValueError(
-                                f"Client cannot update evidence to non-user source_type '{client_st}'"
-                            )
+                            raise ValueError(f"Client cannot update evidence to non-user source_type '{client_st}'")
                         row_dict["source_type"] = "USER_ENTERED"
 
                     # Optimistic Concurrency Check
@@ -254,14 +270,32 @@ def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
                             setattr(existing, key, val)
                     records_processed += 1
 
-            # Complete transaction
-            db.flush()
-            req_record.status = "SUCCESS"
-            req_record.completed_at = func.now()
-            db.commit()
+            if conflicts:
+                # User correction #2: Conflict rolls back ENTIRE push transaction.
+                db.rollback()
+                records_processed = 0
+                # Do not mark SUCCESS.
+                # Re-fetch the record and mark FAILED? Wait, the transaction rollback just wiped out any pending changes
+                # to the sync record if it was done in the same transaction. But I did db.commit() above for the PENDING state.
+                # So we can just leave it as PENDING (or set to FAILED if we want to be explicit).
+                req_record_again = db.get(SyncRequestRecord, sync_req.sync_request_id)
+                if req_record_again:
+                    req_record_again.status = "FAILED"
+                    db.commit()
+            else:
+                # Complete transaction
+                db.flush()
+                req_record.status = "SUCCESS"
+                req_record.completed_at = func.now()
+                req_record.payload_hash = payload_hash
+                db.commit()
 
         except Exception as e:
             db.rollback()
+            req_record_again = db.get(SyncRequestRecord, sync_req.sync_request_id)
+            if req_record_again:
+                req_record_again.status = "FAILED"
+                db.commit()
             raise e
 
     # PULL Phase
@@ -294,7 +328,6 @@ def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
         # Coalescing map: table -> record_id -> (operation, obj)
         coalesced = {}
         for ch in changes_list:
-            print(f"DEBUG: seq={ch.sequence}, op={ch.operation}, id={ch.record_id}, table={ch.table_name}")
             if ch.table_name not in coalesced:
                 coalesced[ch.table_name] = {}
                 

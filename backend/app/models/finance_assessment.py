@@ -21,17 +21,17 @@ class FinanceAssessment(Base, SyncableMixin):
     scheme_rule_id: Mapped[Optional[str]] = mapped_column(
         String(64), ForeignKey("scheme_rules.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    project_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    margin_contribution: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    maximum_loan: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    recommended_loan: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    annual_interest_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
-    total_tenure_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    margin_contribution: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    maximum_loan: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    recommended_loan: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    annual_interest_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    total_tenure_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     moratorium_months: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    active_repayment_months: Mapped[int] = mapped_column(Integer, nullable=False)
-    capitalized_principal: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    emi: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    total_interest: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    active_repayment_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    capitalized_principal: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    emi: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    total_interest: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
     debt_affordability_status: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True
     )
@@ -54,7 +54,8 @@ class FinanceAssessment(Base, SyncableMixin):
     household_buffer_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
     break_even_units: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
-    policy_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    policy_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    engine_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     input_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     
     calculation_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

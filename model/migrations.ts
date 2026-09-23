@@ -29,7 +29,18 @@ export default schemaMigrations({
                         { name: 'quantity_unit', type: 'string', isOptional: true },
                         { name: 'content_hash', type: 'string', isOptional: true },
                         { name: 'derivation_type', type: 'string', isOptional: true },
-                        { name: 'derivation_version', type: 'string', isOptional: true }
+                        { name: 'derivation_version', type: 'string', isOptional: true },
+                        { name: 'reference_period_start', type: 'number', isOptional: true },
+                        { name: 'reference_period_end', type: 'number', isOptional: true },
+                        { name: 'parent_evidence_ids', type: 'string', isOptional: true },
+                    ],
+                }),
+                addColumns({
+                    table: 'finance_assessments',
+                    columns: [
+                        { name: 'policy_version', type: 'string', isOptional: true },
+                        { name: 'engine_version', type: 'string', isOptional: true },
+                        { name: 'input_hash', type: 'string', isOptional: true },
                     ],
                 }),
             ],
