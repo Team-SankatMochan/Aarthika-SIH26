@@ -58,6 +58,7 @@ class StressTestScenario(Base, SyncableMixin):
     debt_repayment_burden: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     working_capital_pressure: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     break_even: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    break_even_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     resilience_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
     result_status: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
 

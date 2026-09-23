@@ -86,8 +86,13 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
     except Exception as e:
         raise RuntimeError(f"CRITICAL: failed to parse calculation-policy.json: {str(e)}")
 
-    min_dscr = Decimal(str(policy.get("minimum_required_dscr", "1.20")))
-    max_hh_debt = Decimal(str(policy.get("maximum_household_debt_ratio", "0.50")))
+    if "minimum_required_dscr" not in policy:
+        raise ValueError("CRITICAL: minimum_required_dscr missing from policy")
+    if "maximum_household_debt_ratio" not in policy:
+        raise ValueError("CRITICAL: maximum_household_debt_ratio missing from policy")
+
+    min_dscr = Decimal(str(policy["minimum_required_dscr"]))
+    max_hh_debt = Decimal(str(policy["maximum_household_debt_ratio"]))
 
     # 4. Formulate Decision (Exact Readiness Rules)
     
@@ -95,32 +100,32 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
     if not latest_fa or latest_fa.business_dscr is None:
         decision_code = "INSUFFICIENT_DATA"
         rationale = "Missing core business data (cannot calculate EMI or Business DSCR)."
-        confidence = Decimal("1.00")
+        confidence = None
         
-    elif latest_fa.household_existing_debt_ratio is None and latest_fa.household_buffer_ratio is None:
+    elif latest_fa.household_post_loan_ratio is None and latest_fa.household_buffer_ratio is None:
         decision_code = "INCOMPLETE"
         rationale = "Business data exists, but household data is missing."
-        confidence = Decimal("1.00")
+        confidence = None
         
     elif latest_fa.break_even_units is None and getattr(latest_fa, "break_even_status", None) in ["STRUCTURALLY_UNVIABLE", "NO_FINITE_BREAK_EVEN"]:
         decision_code = "MODIFY"
         rationale = "Unviable business economics (e.g., negative contribution margin)."
-        confidence = Decimal("1.00")
+        confidence = None
         
     elif not pilot_results or avg_price_acceptance < Decimal("50.00") or avg_repeat_purchase < Decimal("30.00"):
         decision_code = "TEST_FIRST"
         rationale = "Pilot validation required before finance review. Metrics are missing or insufficient."
-        confidence = Decimal("1.00")
+        confidence = None
         
-    elif scenarios_insolvent > 0 or latest_fa.business_dscr < min_dscr or (latest_fa.household_existing_debt_ratio is not None and latest_fa.household_existing_debt_ratio > max_hh_debt):
+    elif scenarios_insolvent > 0 or latest_fa.business_dscr < min_dscr or (latest_fa.household_post_loan_ratio is not None and latest_fa.household_post_loan_ratio > max_hh_debt):
         decision_code = "HIGH_RISK"
-        rationale = "DSCR < minimum threshold, severe stress test failure, or household debt ratio too high."
-        confidence = Decimal("1.00")
+        rationale = "DSCR < minimum threshold, severe stress test failure, or household post-loan debt ratio too high."
+        confidence = None
         
     else:
         decision_code = "READY_FOR_FINANCE_REVIEW"
         rationale = "Full data exists, DSCR >= minimum, Household metrics pass policy thresholds, and pilots validate demand."
-        confidence = Decimal("1.00")
+        confidence = None
     # Summaries
     evidence_summary = {
         "total_evidence_count": len(all_evidence),

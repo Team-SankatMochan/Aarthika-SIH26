@@ -62,7 +62,11 @@ def run_stress_test_for_business(
     
     base_operating_cost = round_cur(base_raw_mat + base_fixed_costs)
     base_surplus = round_cur(base_revenue - base_operating_cost)
-    base_working_cap = Decimal(str(assumption.working_capital_required if assumption.working_capital_required is not None else (assumption.working_capital or 0)))
+    
+    raw_wc = assumption.working_capital_required if assumption.working_capital_required is not None else assumption.working_capital
+    if raw_wc is None:
+        raise ValueError("INSUFFICIENT_DATA: Missing required Working Capital.")
+    base_working_cap = Decimal(str(raw_wc))
 
     # 4. Create StressTest record
     stress_test = StressTest(
@@ -145,18 +149,10 @@ def run_stress_test_for_business(
     scenarios_to_run = request.scenarios_to_run or list(scenario_configs.keys())
 
     for sc_key in scenarios_to_run:
-        cfg = scenario_configs.get(
-            sc_key,
-            {
-                "name": "general_stress",
-                "pct": Decimal("-15.00"),
-                "vol_factor": Decimal("0.85"),
-                "price_factor": Decimal("0.95"),
-                "raw_mat_factor": Decimal("1.10"),
-                "transport_factor": Decimal("1.10"),
-                "wc_factor": Decimal("1.20"),
-            },
-        )
+        if sc_key not in scenario_configs:
+            raise ValueError(f"Unknown scenario configuration requested: {sc_key}")
+        
+        cfg = scenario_configs[sc_key]
 
         sim_revenue = round_cur(base_monthly_vol * cfg["vol_factor"] * (base_price * cfg["price_factor"]))
         sim_raw_mat = round_cur(base_raw_mat * cfg["raw_mat_factor"])
@@ -177,30 +173,27 @@ def run_stress_test_for_business(
         
         if unit_contrib > Decimal("0.00"):
             break_even_units = round_cur(sim_fixed / unit_contrib)
+            break_even_status = "FINITE"
         else:
             break_even_units = None
+            break_even_status = "STRUCTURALLY_UNVIABLE" if unit_contrib < Decimal("0.00") else "NO_FINITE_BREAK_EVEN"
 
+        resilience_score = None
         # Resilience calculation
         if monthly_emi > Decimal("0"):
             dscr = sim_cash_surplus / monthly_emi
             if dscr >= Decimal("1.50"):
-                resilience_score = Decimal("100.00")
                 result_status = "SURVIVES"
             elif dscr >= Decimal("1.00"):
-                resilience_score = round_cur(dscr * Decimal("50.00"))
                 result_status = "AT_RISK"
             elif dscr > Decimal("0"):
-                resilience_score = round_cur(dscr * Decimal("30.00"))
                 result_status = "INSOLVENT"
             else:
-                resilience_score = Decimal("0.00")
                 result_status = "INSOLVENT"
         else:
             if sim_cash_surplus > Decimal("0"):
-                resilience_score = Decimal("100.00")
                 result_status = "SURVIVES"
             else:
-                resilience_score = Decimal("0.00")
                 result_status = "INSOLVENT"
 
         scenario = StressTestScenario(
@@ -215,6 +208,7 @@ def run_stress_test_for_business(
             debt_repayment_burden=monthly_emi,
             working_capital_pressure=sim_wc_pressure,
             break_even=break_even_units,
+            break_even_status=break_even_status,
             resilience_score=resilience_score,
             result_status=result_status,
         )

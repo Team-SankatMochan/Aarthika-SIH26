@@ -31,6 +31,18 @@ def test_users_crud_api(client: TestClient):
     assert get_resp.json()["id"] == user_id
 
 
+def test_business_creation_rejects_missing_user(client: TestClient):
+    """Ensure we no longer create dummy Prototyper users for missing IDs."""
+    business_payload = {
+        "user_id": "non_existent_user_id_123",
+        "business_name": "Test Business",
+        "business_category": "farming"
+    }
+    create_resp = client.post("/businesses", json=business_payload)
+    assert create_resp.status_code == 404
+    assert create_resp.json()["detail"] == "User not found"
+
+
 def test_schemes_api(client: TestClient, seeded_schemes):
     """Test schemes listing and retrieval via API."""
     list_resp = client.get("/schemes")

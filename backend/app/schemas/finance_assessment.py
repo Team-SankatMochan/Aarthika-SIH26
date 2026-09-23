@@ -27,6 +27,12 @@ class FinanceAssessmentRequest(BaseModel):
     monthly_household_essential_expenses: Optional[Decimal] = Field(None, ge=0)
     existing_monthly_household_debt_payments: Optional[Decimal] = Field(None, ge=0)
 
+    # Manual terms
+    annual_interest_rate_percent: Optional[Decimal] = Field(None, ge=0)
+    repayment_tenure_months: Optional[int] = Field(None, ge=0)
+    moratorium_months: Optional[int] = Field(None, ge=0)
+    moratorium_interest_method: Optional[str] = Field(None)
+
 class FinanceAssessmentBase(BaseModel):
     business_id: str = Field(..., max_length=64)
     scheme_id: Optional[str] = None
@@ -49,7 +55,7 @@ class FinanceAssessmentBase(BaseModel):
     
     debt_affordability_status: str = Field(..., examples=["INSUFFICIENT_DATA", "HIGH_RISK", "READY_FOR_FINANCE_REVIEW"])
     debt_service_burden: Optional[Decimal] = Field(None, ge=0)
-    working_capital_requirement: Optional[Decimal] = Field(default=Decimal("0.00"), ge=0)
+    working_capital_requirement: Optional[Decimal] = Field(None, ge=0)
     calculation_version: int = Field(default=1, ge=1)
     
     # --- Canonical Assessment Fields ---
@@ -65,7 +71,8 @@ class FinanceAssessmentBase(BaseModel):
     household_buffer_ratio: Optional[Decimal] = Field(None)
     break_even_units: Optional[int] = Field(None)
     
-    policy_version: int = Field(default=1, ge=1)
+    policy_version: Optional[str] = Field(None, max_length=50)
+    engine_version: Optional[str] = Field(None, max_length=50)
     input_hash: Optional[str] = Field(None, max_length=64)
 
 

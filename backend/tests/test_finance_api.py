@@ -1,68 +1,69 @@
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from app.main import app
-from app.db.session import get_db
-from app.db.base import Base
 
-# Use an in-memory SQLite database for testing
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-def override_get_db():
-    try:
-        db = TestingSessionLocal()
-        yield db
-    finally:
-        db.close()
-
-app.dependency_overrides[get_db] = override_get_db
-
-@pytest.fixture(autouse=True)
-def setup_db():
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
-
-client = TestClient(app)
-
-def test_finance_assessment_canonical_payload():
-    """Test valid canonical payload produces deterministic finance output"""
-    payload = {
-        "business_id": "test-123",
-        "project_cost": 100000.0,
-        "margin_contribution": 10000.0,
-        "working_capital_needed": 10000.0
+@pytest.fixture
+def seeded_business(client):
+    user_payload = {
+        "name": "Finance Tester",
+        "phone": "+919998887776",
+        "available_capital": 50000.00,
+        "skills": ["tailoring"],
+        "risk_tolerance": "MODERATE",
     }
-    # Note: We need a business assumption first to provide the canonical data
-    # But since it's an API test, we should mock or insert test data to DB
-    # or just call the endpoint and verify it falls back safely.
+    user_res = client.post("/users", json=user_payload)
+    user_id = user_res.json()["id"]
+
+    biz_payload = {
+        "user_id": user_id,
+        "business_name": "Test Finance Business",
+        "business_category": "tailoring",
+        "working_capital_needed": 10000.0,
+    }
+    biz_res = client.post("/businesses", json=biz_payload)
+    return biz_res.json()["id"]
+
+
+def test_finance_assessment_manual_mode(client, seeded_business):
+    """Test manual mode calculation and persistence"""
+    payload = {
+        "financing_mode": "MANUAL",
+        "project_cost": 100000.0,
+        "monthly_units_sold": 100,
+        "selling_price_per_unit": 500,
+        "variable_cost_per_unit": 200,
+        "monthly_other_fixed_cost": 10000,
+        "requested_loan_amount": 50000.0,
+        "monthly_household_nonbusiness_income": 20000,
+        "monthly_household_essential_expenses": 10000,
+        "existing_monthly_household_debt_payments": 2000,
+        "annual_interest_rate_percent": 12.0,
+        "repayment_tenure_months": 24,
+        "moratorium_months": 0
+    }
     
-    # We expect INSUFFICIENT_DATA if no business assumption exists
-    response = client.post("/businesses/test-123/finance-assessment", json=payload)
-    assert response.status_code == 404 # since test-123 business does not exist
+    response = client.post(f"/businesses/{seeded_business}/finance-assessment", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["business_id"] == seeded_business
+    assert data["debt_affordability_status"] in ["READY_FOR_FINANCE_REVIEW", "HIGH_RISK"]
+    assert data["capitalized_principal"] == "50000.00"
+    assert data["annual_interest_rate"] == "12.00"
+    assert data["total_tenure_months"] == 24
     
-def test_missing_loan_terms_no_fabricated_interest():
+def test_finance_assessment_missing_working_capital_is_null(client, seeded_business):
     payload = {
+        "financing_mode": "MANUAL",
         "project_cost": 100000.0,
-        "margin_contribution": 10000.0
+        "monthly_units_sold": 100,
+        "selling_price_per_unit": 500,
+        "variable_cost_per_unit": 200,
+        "requested_loan_amount": 50000.0,
+        "monthly_household_nonbusiness_income": 20000,
+        "annual_interest_rate_percent": 12.0,
+        "repayment_tenure_months": 24,
     }
-    # Business doesn't exist so we expect 404
-    response = client.post("/businesses/test-missing-terms/finance-assessment", json=payload)
-    assert response.status_code == 404
-
-def test_missing_household_data_no_pass():
-    payload = {
-        "project_cost": 100000.0,
-        "margin_contribution": 10000.0
-    }
-    response = client.post("/businesses/test-missing-household/finance-assessment", json=payload)
-    assert response.status_code == 404
+    response = client.post(f"/businesses/{seeded_business}/finance-assessment", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["working_capital_requirement"] is None

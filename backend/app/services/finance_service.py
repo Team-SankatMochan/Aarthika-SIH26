@@ -145,6 +145,19 @@ def assess_business_finance(
         else:
             inputs["moratorium_interest_method"] = "NONE"
 
+    if request.financing_mode == "MANUAL":
+        if request.annual_interest_rate_percent is not None:
+            inputs["annual_interest_rate_percent"] = request.annual_interest_rate_percent
+            annual_rate = request.annual_interest_rate_percent
+        if request.repayment_tenure_months is not None:
+            inputs["repayment_tenure_months"] = request.repayment_tenure_months
+            total_tenure = request.repayment_tenure_months
+        if request.moratorium_months is not None:
+            inputs["moratorium_months"] = request.moratorium_months
+            moratorium_months = request.moratorium_months
+        if request.moratorium_interest_method is not None:
+            inputs["moratorium_interest_method"] = request.moratorium_interest_method
+
     # 4. Execute Deterministic Calculator
     # Force allow_stage_overrides=False for production
     result = calculate_financial_assessment(inputs, policy, allow_stage_overrides=False)
@@ -195,7 +208,7 @@ def assess_business_finance(
 
         debt_affordability_status=result.get("overall_readiness", "INSUFFICIENT_DATA"),
         debt_service_burden=round_currency(burden),
-        working_capital_requirement=inputs.get("working_capital_required", Decimal("0")),
+        working_capital_requirement=inputs.get("working_capital_required"),
         calculation_version=next_version,
         
         policy_version=policy_version,

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * AARTHIKA - Mobile Application (React Native / Expo)
  * "Clarity Before Credit"
@@ -55,12 +54,12 @@ _tGlobal.AARTHIKA_TRANSLATIONS = AARTHIKA_TRANSLATIONS;
 
 // Shared helper: map in-memory activeBusiness plan to backend schema
 function buildAssumptionsPayload(biz: any, businessId: string): Record<string, unknown> {
-  const setupCost = biz?.setupCost ?? 95000;
-  const monthlyFixed = biz?.monthlyFixed ?? 4000;
-  const pricePerUnit = biz?.pricePerUnit ?? 40;
-  const costPerUnit = biz?.costPerUnit ?? 18;
-  const salesPerMonth = biz?.salesPerMonth ?? 1800;
-  const personalCost = biz?.personalCost ?? 8000;
+  const setupCost = biz?.setupCost;
+  const monthlyFixed = biz?.monthlyFixed;
+  const pricePerUnit = biz?.pricePerUnit;
+  const costPerUnit = biz?.costPerUnit;
+  const salesPerMonth = biz?.salesPerMonth;
+  const personalCost = biz?.personalCost;
 
   return {
     business_id: businessId,
@@ -1263,12 +1262,12 @@ function RiskTestScreen() {
   };
 
   const transformReportToDashboard = (report: any, business: any): any => {
-    const setupCost = business?.setupCost || 95000;
-    const monthlyFixed = business?.monthlyFixed || 4000;
-    const pricePerUnit = business?.pricePerUnit || 40;
-    const costPerUnit = business?.costPerUnit || 18;
-    const salesPerMonth = business?.salesPerMonth || 1800;
-    const personalCost = business?.personalCost || 8000;
+    const setupCost = business?.setupCost || 0;
+    const monthlyFixed = business?.monthlyFixed || 0;
+    const pricePerUnit = business?.pricePerUnit || 0;
+    const costPerUnit = business?.costPerUnit || 0;
+    const salesPerMonth = business?.salesPerMonth || 0;
+    const personalCost = business?.personalCost || 0;
 
     // Use Canonical Engine
     const inputs = {
@@ -1389,11 +1388,11 @@ function RiskTestScreen() {
     ];
 
     return {
-      overallRiskScore: report.risk_assessment?.overall_risk || 0.28,
-      businessViabilityScore: report.confidence || 0.88,
+      overallRiskScore: 0.28,
+      businessViabilityScore: 0.88,
       financialResilience: Math.min(0.9, Math.max(0.1, monthlyNetProfit / monthlyRevenue || 0.25)),
-      marketRisk: report.risk_assessment?.market_risk || 0.25,
-      operationalRisk: report.risk_assessment?.operational_risk || 0.3,
+      marketRisk: 0.25,
+      operationalRisk: 0.3,
       swot,
       risks,
       financials: {
@@ -1417,14 +1416,13 @@ function RiskTestScreen() {
       },
       scenarios,
       recommendation: {
-        decision: decisionMap[report.decision] || 'GO',
-        rationale: report.rationale || 'Analysis complete with high viability',
+        decision: 'REVIEW',
+        rationale: report.summary || 'Analysis complete',
         supportingPoints: [
-          `Viability Index: ${Math.round((report.confidence || 0.88) * 100)}/100`,
-          `Safety Margin Cushion: ${safetyMarginPct ? safetyMarginPct.toFixed(0) : '45'}%`,
-          'Break-even reached within 3 weeks of monthly sales',
+          report.deterministic_findings_explained || 'Findings explained.',
+          ...(report.caveats || []),
         ],
-        actionItems: report.next_steps || ['Finalize vendor list', 'Review working capital buffer', 'Initiate Phase 1 setup'],
+        actionItems: report.suggested_next_steps || ['Finalize vendor list', 'Review working capital buffer', 'Initiate Phase 1 setup'],
       },
     };
   };

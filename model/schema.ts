@@ -128,6 +128,7 @@ export default appSchema({
                 { name: 'debt_repayment_burden', type: 'number', isOptional: true },
                 { name: 'working_capital_pressure', type: 'number', isOptional: true },
                 { name: 'break_even', type: 'number', isOptional: true },
+                { name: 'break_even_status', type: 'string', isOptional: true },
                 { name: 'resilience_score', type: 'number', isOptional: true },
                 { name: 'result_status', type: 'string' }, // viable, stressed, unviable
                 { name: 'created_at', type: 'number' },
@@ -236,7 +237,7 @@ export default appSchema({
                 { name: 'total_interest', type: 'number', isOptional: true },
                 { name: 'debt_affordability_status', type: 'string' },
                 { name: 'debt_service_burden', type: 'number' },
-                { name: 'working_capital_requirement', type: 'number' },
+                { name: 'working_capital_requirement', type: 'number', isOptional: true },
                 { name: 'calculation_version', type: 'number' },
                 { name: 'policy_version', type: 'string', isOptional: true },
                 { name: 'engine_version', type: 'string', isOptional: true },

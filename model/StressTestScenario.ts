@@ -19,8 +19,9 @@ export default class StressTestScenario extends Model {
     @field('cash_surplus') cashSurplus!: number;
     @field('debt_repayment_burden') debtRepaymentBurden!: number;
     @field('working_capital_pressure') workingCapitalPressure!: number;
-    @field('break_even') breakEven!: number;
-    @field('resilience_score') resilienceScore!: number;
+    @field('break_even') breakEven?: number;
+    @field('break_even_status') breakEvenStatus?: string;
+    @field('resilience_score') resilienceScore?: number;
     @field('result_status') resultStatus!: string; // viable, stressed, unviable
     @readonly @date('created_at') createdAt!: number;
 

@@ -17,7 +17,8 @@ def test_assess_business_finance(db_session, sample_business, seeded_schemes):
         requested_loan_amount=Decimal("100000"),
         monthly_household_nonbusiness_income=Decimal("20000"),
         monthly_household_essential_expenses=Decimal("5000"),
-        existing_monthly_household_debt_payments=Decimal("1000")
+        existing_monthly_household_debt_payments=Decimal("1000"),
+        project_cost=Decimal("120000")
     )
     
     assessment = assess_business_finance(biz_id, req, db_session)

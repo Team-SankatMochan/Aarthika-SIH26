@@ -124,8 +124,11 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
     result.business_dscr = Number(roundCurrency(bizDscr)!.toFixed(2));
   }
 
-  const minDscr = new Decimal(policy.minimum_required_dscr || "1.20");
-  const maxHhDebt = new Decimal(policy.maximum_household_debt_ratio || "0.50");
+  if (!policy.minimum_required_dscr) throw new Error("CRITICAL: minimum_required_dscr missing from policy");
+  if (!policy.maximum_household_debt_ratio) throw new Error("CRITICAL: maximum_household_debt_ratio missing from policy");
+  
+  const minDscr = new Decimal(policy.minimum_required_dscr);
+  const maxHhDebt = new Decimal(policy.maximum_household_debt_ratio);
 
   let maxEmi = null;
   if (result.business_cash_available_for_debt_service != null) {

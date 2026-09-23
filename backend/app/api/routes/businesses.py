@@ -18,16 +18,7 @@ def create_business(business_in: BusinessCreate, db: Session = Depends(get_db)):
 
     user = db.get(User, business_in.user_id)
     if not user:
-        # Create prototype dummy user on-the-fly to allow frontend integration to succeed
-        user = User(id=business_in.user_id, name="Prototyper", phone="9999999999", available_capital=50000)
-        db.add(user)
-        try:
-            db.commit()
-            db.refresh(user)
-        except Exception:
-            db.rollback()
-            raise HTTPException(status_code=400, detail="Failed to mock user. Check schema.")
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     db_obj = Business(**business_in.model_dump(exclude_unset=True))
     db.add(db_obj)

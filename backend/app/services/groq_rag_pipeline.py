@@ -21,32 +21,13 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.config import settings
 
-# Unified Pydantic Model for Structured Output
-class MarketAnalysis(BaseModel):
-    demand_level: str = Field(description="HIGH | MEDIUM | LOW")
-    competitor_count: str
-    market_trend_score: float
-    swot_strengths: list[str]
-    swot_weaknesses: list[str]
-    swot_opportunities: list[str]
-    swot_threats: list[str]
-
-class RiskAssessment(BaseModel):
-    market_risk: float
-    financial_risk: float
-    operational_risk: float
-    overall_risk: float
-    top_risks: list[str]
-    mitigation_strategies: list[str]
-
 class UnifiedReport(BaseModel):
-    decision: str = Field(description="GO | MODIFY | DO_NOT_INVEST_YET")
-    confidence: float
-    rationale: str
-    market_analysis: MarketAnalysis
-    risk_assessment: RiskAssessment
-    modifications: list[str]
-    next_steps: list[str]
+    summary: str
+    deterministic_findings_explained: str
+    caveats: list[str]
+    questions_to_validate: list[str]
+    suggested_next_steps: list[str]
+
 class AgentState(TypedDict):
     business_id: str
     business_category: str
@@ -93,15 +74,13 @@ class GroqRAGPipeline:
         }
 
     def _unified_agent(self, state: AgentState) -> dict:
-        system_prompt = """You are an elite Micro-Finance and MSME Credit Risk Analyst operating as the core intelligence for the 'Aarthika' platform.
+        system_prompt = """You are an elite Micro-Finance and MSME Credit Risk Analyst operating as an explanatory intelligence for the 'Aarthika' platform.
 
-Your task is to analyze the provided business profile, financial details, and market context to generate a comprehensive, highly structured risk assessment.
+Your task is to analyze the provided business profile, financial details, and market context to generate a purely explanatory report.
+DO NOT invent numeric risk scores, market demand levels, or GO/NO-GO investment decisions. Your role is solely to explain findings, highlight caveats, ask questions to validate, and suggest next steps.
 
 CRITICAL REQUIREMENT:
-You must respond with ONLY a valid, minified JSON object. Absolutely NO markdown formatting, NO backticks (```json), NO conversational text, and NO preamble. Just the raw JSON.
-
-The frontend relies on this exact JSON schema to render graphs, SWOT matrices, and Risk Gauges. Ensure all arrays contain short, punchy, dashboard-ready strings (under 10 words each) rather than long paragraphs, as these will be rendered inside UI cards and lists.
-Ensure scores (floats) are accurately calculated based on logical risk principles."""
+You must respond with ONLY a valid, minified JSON object. Absolutely NO markdown formatting, NO backticks (```json), NO conversational text, and NO preamble. Just the raw JSON."""
 
         human_prompt = """Assess risks for this business:
 
@@ -120,16 +99,9 @@ Market Context:
             "retrieved_context": state["retrieved_context"]
         }
 
-        # openai/gpt-oss-120b on Groq refuses the implicit function-call
-        # wrapper that with_structured_output(function_calling) uses (Groq
-        # returns 400 "Tool choice is required, but model did not call a
-        # tool"), and its json_mode wrapper does NOT inject the UnifiedReport
-        # schema into the prompt, so the model invents its own keys. The
-        # schema therefore has to be embedded in the prompt text itself.
         schema_hint = json.dumps(UnifiedReport.model_json_schema())
 
         def _extract_and_validate(raw: str) -> UnifiedReport:
-            # Strip any accidental markdown fences / whitespace around the JSON
             text = raw.strip()
             if text.startswith("```"):
                 text = text.split("```", 2)[1]
@@ -140,7 +112,6 @@ Market Context:
                 raise ValueError(f"No JSON object in model output: {raw[:200]}")
             return UnifiedReport.model_validate_json(text[start:end + 1])
 
-        # Primary: JSON mode with the exact schema in the prompt.
         json_llm = self.llm.bind(response_format={"type": "json_object"})
         schema_system = (
             system_prompt
@@ -148,8 +119,6 @@ Market Context:
               "(use the exact snake_case field names, no aliases, no extra keys, no commentary):\n"
             + schema_hint
         )
-        # Plain messages (NOT a ChatPromptTemplate): the JSON schema contains
-        # nested braces that the prompt template's f-string parser rejects.
         schema_messages = [
             SystemMessage(content=schema_system),
             HumanMessage(content=human_prompt.format(**inputs)),
@@ -159,8 +128,6 @@ Market Context:
                 json_llm.invoke(schema_messages).content
             )
         except Exception as first_err:
-            # A single retry with a slightly higher temperature usually
-            # recovers from a truncated / malformed first attempt.
             print(f"[pipeline] JSON-mode attempt failed ({first_err}); retrying once")
             from langchain_groq import ChatGroq
             warm_llm = ChatGroq(
@@ -175,7 +142,7 @@ Market Context:
 
         return {
             "report": result,
-            "messages": [AIMessage(content=f"Report generated. Decision: {result.decision}")]
+            "messages": [AIMessage(content=f"Report generated.")]
         }
 
     def _build_graph(self) -> StateGraph:
@@ -201,17 +168,14 @@ Market Context:
         final_state = await self.graph.ainvoke(initial_state)
         r = final_state["report"]
         
-        # Format it exactly as ai_reports.py expects
         return {
             "business_id": business_id,
-            "market_analysis": r.market_analysis.dict(),
-            "risk_assessment": r.risk_assessment.dict(),
             "final_recommendation": {
-                "decision": r.decision,
-                "rationale": r.rationale,
-                "confidence": r.confidence,
-                "modifications": r.modifications,
-                "next_steps": r.next_steps
+                "summary": r.summary,
+                "deterministic_findings_explained": r.deterministic_findings_explained,
+                "caveats": r.caveats,
+                "questions_to_validate": r.questions_to_validate,
+                "suggested_next_steps": r.suggested_next_steps
             },
             "metadata": {
                 "retrieved_context": final_state["retrieved_context"],

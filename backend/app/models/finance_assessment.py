@@ -36,8 +36,8 @@ class FinanceAssessment(Base, SyncableMixin):
         String(50), nullable=False, index=True
     )
     debt_service_burden: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
-    working_capital_requirement: Mapped[Decimal] = mapped_column(
-        Numeric(14, 2), default=Decimal("0.00"), nullable=False
+    working_capital_requirement: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(14, 2), nullable=True
     )
     
     # --- New Canonical Assessment Fields ---

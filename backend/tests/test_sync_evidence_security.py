@@ -179,7 +179,7 @@ def test_provider_evidence_update_from_client_rejected(db_session, sync_business
         },
     )
 
-    with pytest.raises(ValueError, match="cannot mutate"):
+    with pytest.raises(ValueError, match="Unauthorized UPDATE on evidence"):
         process_sync_request(sync_req, db_session)
 
 

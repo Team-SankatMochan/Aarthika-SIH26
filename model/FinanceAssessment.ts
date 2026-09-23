@@ -10,23 +10,27 @@ export default class FinanceAssessment extends Model {
     } as const;
 
     @field('business_id') businessId!: string;
-    @field('scheme_id') schemeId!: string;
-    @field('scheme_rule_id') schemeRuleId!: string;
-    @field('project_cost') projectCost!: number;
-    @field('margin_contribution') marginContribution!: number;
-    @field('maximum_loan') maximumLoan!: number;
-    @field('recommended_loan') recommendedLoan!: number;
-    @field('annual_interest_rate') annualInterestRate!: number;
-    @field('total_tenure_months') totalTenureMonths!: number;
+    @field('scheme_id') schemeId?: string;
+    @field('scheme_rule_id') schemeRuleId?: string;
+    @field('project_cost') projectCost?: number;
+    @field('margin_contribution') marginContribution?: number;
+    @field('maximum_loan') maximumLoan?: number;
+    @field('recommended_loan') recommendedLoan?: number;
+    @field('annual_interest_rate') annualInterestRate?: number;
+    @field('total_tenure_months') totalTenureMonths?: number;
     @field('moratorium_months') moratoriumMonths!: number;
-    @field('active_repayment_months') activeRepaymentMonths!: number;
-    @field('capitalized_principal') capitalizedPrincipal!: number;
-    @field('emi') emi!: number;
-    @field('total_interest') totalInterest!: number;
-    @field('debt_affordability_status') debtAffordabilityStatus!: string; // AFFORDABLE, STRETCHED, UNSUSTAINABLE
+    @field('active_repayment_months') activeRepaymentMonths?: number;
+    @field('capitalized_principal') capitalizedPrincipal?: number;
+    @field('emi') emi?: number;
+    @field('total_interest') totalInterest?: number;
+    @field('debt_affordability_status') debtAffordabilityStatus!: string; // AFFORDABLE, STRETCHED, UNSUSTAINABLE, READY_FOR_FINANCE_REVIEW, HIGH_RISK
     @field('debt_service_burden') debtServiceBurden!: number;
-    @field('working_capital_requirement') workingCapitalRequirement!: number;
+    @field('working_capital_requirement') workingCapitalRequirement?: number;
     @field('calculation_version') calculationVersion!: number;
+    
+    @field('policy_version') policyVersion?: string;
+    @field('engine_version') engineVersion?: string;
+    @field('input_hash') inputHash?: string;
     
     // P1 fields
     @field('scheme_rule_version') schemeRuleVersion?: number;
@@ -37,10 +41,10 @@ export default class FinanceAssessment extends Model {
     @relation('businesses', 'business_id') business!: Relation<Business>;
 
     get totalRepayment(): number {
-        return this.emi * this.activeRepaymentMonths;
+        return (this.emi || 0) * (this.activeRepaymentMonths || 0);
     }
 
     get isAffordable(): boolean {
-        return this.debtAffordabilityStatus === 'AFFORDABLE';
+        return this.debtAffordabilityStatus === 'AFFORDABLE' || this.debtAffordabilityStatus === 'READY_FOR_FINANCE_REVIEW';
     }
 }

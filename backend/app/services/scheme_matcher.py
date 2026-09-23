@@ -57,7 +57,10 @@ def evaluate_rule_freshness(
     if not isinstance(last_verified, datetime):
         return "UNKNOWN"
 
-    stale_hours = freshness_policy.get("stale_after_hours", 720)
+    if "stale_after_hours" not in freshness_policy:
+        raise ValueError("CRITICAL: freshness_policy missing stale_after_hours")
+    
+    stale_hours = freshness_policy["stale_after_hours"]
     age_hours = (evaluation_dt - last_verified).total_seconds() / 3600.0
     return "VERIFIED_FRESH" if age_hours <= stale_hours else "VERIFIED_STALE"
 
