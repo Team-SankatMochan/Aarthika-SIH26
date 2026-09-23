@@ -88,13 +88,19 @@ def test_invalid_business_assumptions():
 
 def test_finance_assessment_request_validation():
     """Verify finance assessment rejects missing or negative values."""
-    # Neither cost nor margin provided
+    # Negative requested loan
     with pytest.raises(ValidationError):
-        FinanceAssessmentRequest()
-
-    # Negative project cost
-    with pytest.raises(ValidationError):
-        FinanceAssessmentRequest(project_cost=Decimal("-10000"))
+        FinanceAssessmentRequest(
+            monthly_units_sold=Decimal("100"),
+            selling_price_per_unit=Decimal("500"),
+            variable_cost_per_unit=Decimal("200"),
+            monthly_rent=Decimal("5000"),
+            monthly_labour_cost=Decimal("2000"),
+            requested_loan_amount=Decimal("-10000"),
+            monthly_household_nonbusiness_income=Decimal("20000"),
+            monthly_household_essential_expenses=Decimal("5000"),
+            existing_monthly_household_debt_payments=Decimal("1000")
+        )
 
 
 def test_market_data_observed_estimated_validation():

@@ -97,18 +97,18 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
     elif not pilot_results or avg_price_acceptance < Decimal("50.00") or avg_repeat_purchase < Decimal("30.00"):
         decision_code = "TEST_FIRST"
         rationale = "Pilot validation required before finance review. Metrics are missing or insufficient."
-        confidence = Decimal("0.85")
+        confidence = Decimal("1.00")
         
     elif scenarios_insolvent > 0 or latest_fa.business_dscr < Decimal("1.20") or (latest_fa.household_existing_debt_ratio is not None and latest_fa.household_existing_debt_ratio > Decimal("0.50")):
         # Note: thresholds are illustrative here; ideally pulled from policy
         decision_code = "HIGH_RISK"
         rationale = "DSCR < minimum threshold, severe stress test failure, or household debt ratio too high."
-        confidence = Decimal("0.90")
+        confidence = Decimal("1.00")
         
     else:
         decision_code = "READY_FOR_FINANCE_REVIEW"
         rationale = "Full data exists, DSCR >= minimum, Household metrics pass policy thresholds, and pilots validate demand."
-        confidence = Decimal("0.95")
+        confidence = Decimal("1.00")
     # Summaries
     evidence_summary = {
         "total_evidence_count": len(all_evidence),

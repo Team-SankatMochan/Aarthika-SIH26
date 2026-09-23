@@ -7,45 +7,54 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class FinanceAssessmentRequest(BaseModel):
     scheme_id: Optional[str] = None
     scheme_rule_id: Optional[str] = None
-    project_cost: Optional[Decimal] = Field(None, gt=0, examples=[140000.00])
-    margin_contribution: Optional[Decimal] = Field(None, gt=0, examples=[14000.00])
-    monthly_net_cash_flow: Optional[Decimal] = Field(None, examples=[12500.00])
-    working_capital_needed: Optional[Decimal] = Field(None, ge=0, examples=[15000.00])
-
-    @model_validator(mode="after")
-    def validate_cost_or_margin_provided(self):
-        if self.project_cost is None and self.margin_contribution is None:
-            raise ValueError("Either project_cost or margin_contribution must be provided")
-        return self
-
+    
+    monthly_units_sold: Optional[Decimal] = Field(None, ge=0)
+    selling_price_per_unit: Optional[Decimal] = Field(None, ge=0)
+    variable_cost_per_unit: Optional[Decimal] = Field(None, ge=0)
+    
+    monthly_labour_cost: Optional[Decimal] = Field(None, ge=0)
+    monthly_rent: Optional[Decimal] = Field(None, ge=0)
+    monthly_transport_cost: Optional[Decimal] = Field(None, ge=0)
+    monthly_other_fixed_cost: Optional[Decimal] = Field(None, ge=0)
+    
+    requested_loan_amount: Optional[Decimal] = Field(None, ge=0)
+    working_capital_required: Optional[Decimal] = Field(None, ge=0)
+    
+    monthly_household_nonbusiness_income: Optional[Decimal] = Field(None, ge=0)
+    monthly_household_essential_expenses: Optional[Decimal] = Field(None, ge=0)
+    existing_monthly_household_debt_payments: Optional[Decimal] = Field(None, ge=0)
 
 class FinanceAssessmentBase(BaseModel):
     business_id: str = Field(..., max_length=64)
     scheme_id: Optional[str] = None
     scheme_rule_id: Optional[str] = None
-    project_cost: Decimal = Field(..., gt=0, examples=[140000.00])
-    margin_contribution: Decimal = Field(..., ge=0, examples=[14000.00])
-    maximum_loan: Decimal = Field(..., ge=0, examples=[125000.00])
-    recommended_loan: Decimal = Field(..., ge=0, examples=[100000.00])
-    annual_interest_rate: Decimal = Field(..., gt=0, le=100, examples=[6.50])
-    total_tenure_months: int = Field(..., gt=0, examples=[36])
-    moratorium_months: int = Field(default=0, ge=0, examples=[3])
-    active_repayment_months: int = Field(..., gt=0, examples=[33])
-    capitalized_principal: Decimal = Field(..., ge=0, examples=[101625.00])
-    emi: Decimal = Field(..., ge=0, examples=[3367.45])
-    total_interest: Decimal = Field(..., ge=0, examples=[9500.85])
-    debt_affordability_status: str = Field(..., examples=["AFFORDABLE", "STRETCHED", "UNSUSTAINABLE"])
-    debt_service_burden: Decimal = Field(..., ge=0, examples=[26.94])
-    working_capital_requirement: Decimal = Field(default=Decimal("0.00"), ge=0)
+    
+    # Keeping old fields as optional to not break schema entirely, though P2 says remove fallbacks
+    project_cost: Optional[Decimal] = Field(None, ge=0)
+    margin_contribution: Optional[Decimal] = Field(None, ge=0)
+    
+    maximum_loan: Optional[Decimal] = Field(None, ge=0)
+    recommended_loan: Optional[Decimal] = Field(None, ge=0)
+    annual_interest_rate: Optional[Decimal] = Field(None, ge=0)
+    total_tenure_months: Optional[int] = Field(None, ge=0)
+    moratorium_months: int = Field(default=0, ge=0)
+    active_repayment_months: Optional[int] = Field(None, ge=0)
+    
+    capitalized_principal: Optional[Decimal] = Field(None, ge=0)
+    emi: Optional[Decimal] = Field(None, ge=0)
+    total_interest: Optional[Decimal] = Field(None, ge=0)
+    
+    debt_affordability_status: str = Field(..., examples=["INSUFFICIENT_DATA", "HIGH_RISK", "READY_FOR_FINANCE_REVIEW"])
+    debt_service_burden: Optional[Decimal] = Field(None, ge=0)
+    working_capital_requirement: Optional[Decimal] = Field(default=Decimal("0.00"), ge=0)
     calculation_version: int = Field(default=1, ge=1)
     
-    # --- New Canonical Assessment Fields ---
+    # --- Canonical Assessment Fields ---
     monthly_revenue: Optional[Decimal] = Field(None, ge=0)
     monthly_variable_cost: Optional[Decimal] = Field(None, ge=0)
     monthly_fixed_cost: Optional[Decimal] = Field(None, ge=0)
     monthly_business_surplus: Optional[Decimal] = Field(None)
     
-    maximum_scheme_loan_amount: Optional[Decimal] = Field(None, ge=0)
     affordable_loan_amount: Optional[Decimal] = Field(None, ge=0)
     
     business_dscr: Optional[Decimal] = Field(None, ge=0)

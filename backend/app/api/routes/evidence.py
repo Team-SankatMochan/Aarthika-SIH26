@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 from app.db.session import get_db
 from app.models.business import Business
-from app.models.evidence import Evidence
+from app.models.evidence import Evidence, validate_canonical_evidence
 from app.schemas.evidence import EvidenceCreate, EvidenceResponse, MarketPriceQueryResponse
 from app.services.evidence_service import EvidenceService
 
@@ -23,6 +23,26 @@ def add_business_evidence(
     biz = db.get(Business, business_id)
     if not biz:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
+        
+    if evidence_in.source_type and evidence_in.source_type != "USER_ENTERED":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Clients can only create evidence with source_type USER_ENTERED via REST API"
+        )
+    evidence_in.source_type = "USER_ENTERED"
+    
+    try:
+        validate_canonical_evidence(
+            source_type=evidence_in.source_type,
+            evidence_type=evidence_in.evidence_type,
+            numeric_value=evidence_in.numeric_value,
+            text_value=evidence_in.text_value,
+            boolean_value=evidence_in.boolean_value,
+            is_legacy=False,
+            legacy_value=evidence_in.value
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     data = evidence_in.model_dump(exclude_unset=True)
     data["business_id"] = business_id

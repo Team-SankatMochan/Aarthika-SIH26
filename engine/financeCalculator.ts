@@ -21,20 +21,25 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
   const result: any = {};
   
   const reqLoan = inputs.requested_loan_amount != null ? new Decimal(inputs.requested_loan_amount) : null;
-  const maxScheme = inputs.maximum_scheme_loan_amount != null ? new Decimal(inputs.maximum_scheme_loan_amount) : null;
-  const affordableOverride = inputs.affordable_loan_amount != null ? new Decimal(inputs.affordable_loan_amount) : null;
   
   const rate = inputs.annual_interest_rate_percent != null ? new Decimal(inputs.annual_interest_rate_percent) : null;
   const repayMonths = inputs.repayment_tenure_months != null ? Number(inputs.repayment_tenure_months) : null;
   const moratorium = inputs.moratorium_months != null ? Number(inputs.moratorium_months) : 0;
   const moratoriumMethod = inputs.moratorium_interest_method || "NONE";
   
-  let unitsSold = inputs.monthly_units_sold != null ? Number(inputs.monthly_units_sold) : null;
-  let price = inputs.selling_price_per_unit != null ? new Decimal(inputs.selling_price_per_unit) : null;
-  let varCost = inputs.variable_cost_per_unit != null ? new Decimal(inputs.variable_cost_per_unit) : null;
-  let fixedCost = inputs.monthly_fixed_cost != null ? new Decimal(inputs.monthly_fixed_cost) : null;
+  const unitsSold = inputs.monthly_units_sold != null ? new Decimal(inputs.monthly_units_sold) : null;
+  const price = inputs.selling_price_per_unit != null ? new Decimal(inputs.selling_price_per_unit) : null;
+  const varCost = inputs.variable_cost_per_unit != null ? new Decimal(inputs.variable_cost_per_unit) : null;
   
-  if (price != null && varCost != null && fixedCost != null) {
+  const labour = inputs.monthly_labour_cost != null ? new Decimal(inputs.monthly_labour_cost) : new Decimal(0);
+  const rent = inputs.monthly_rent != null ? new Decimal(inputs.monthly_rent) : new Decimal(0);
+  const transport = inputs.monthly_transport_cost != null ? new Decimal(inputs.monthly_transport_cost) : new Decimal(0);
+  const otherFixed = inputs.monthly_other_fixed_cost != null ? new Decimal(inputs.monthly_other_fixed_cost) : new Decimal(0);
+  
+  const fixedCost = inputs.monthly_fixed_cost != null ? new Decimal(inputs.monthly_fixed_cost) : labour.add(rent).add(transport).add(otherFixed);
+  result.monthly_fixed_cost = Number(roundCurrency(fixedCost)!.toFixed(2));
+  
+  if (price != null && varCost != null) {
     const cm = price.sub(varCost);
     result.unit_contribution_margin = Number(roundCurrency(cm)!.toFixed(2));
     
@@ -50,18 +55,15 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
     }
   }
 
-  if (unitsSold != null && price != null && varCost != null && fixedCost != null) {
+  if (unitsSold != null && price != null && varCost != null) {
     const rev = price.mul(unitsSold);
     const vc = varCost.mul(unitsSold);
-    const fc = fixedCost;
-    const surplus = rev.sub(vc).sub(fc);
+    const surplus = rev.sub(vc).sub(fixedCost);
     
-    const prefix = "";
-    result[`${prefix}monthly_revenue`] = Number(roundCurrency(rev)!.toFixed(2));
-    result[`${prefix}monthly_variable_cost`] = Number(roundCurrency(vc)!.toFixed(2));
-    result[`${prefix}monthly_fixed_cost`] = Number(roundCurrency(fc)!.toFixed(2));
-    result[`${prefix}monthly_operating_surplus`] = Number(roundCurrency(surplus)!.toFixed(2));
-    result[`${prefix}business_cash_available_for_debt_service`] = Number(roundCurrency(surplus)!.toFixed(2));
+    result.monthly_revenue = Number(roundCurrency(rev)!.toFixed(2));
+    result.monthly_variable_cost = Number(roundCurrency(vc)!.toFixed(2));
+    result.monthly_operating_surplus = Number(roundCurrency(surplus)!.toFixed(2));
+    result.business_cash_available_for_debt_service = Number(roundCurrency(surplus)!.toFixed(2));
   }
   
   function getPCap(p: Decimal, r: Decimal, m: number, method: string): Decimal {
@@ -93,39 +95,57 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
   }
   
   const monthlyRate = rate != null ? rate.div(100).div(12) : null;
+  const maxScheme = inputs.maximum_scheme_loan_amount != null ? new Decimal(inputs.maximum_scheme_loan_amount) : null;
   
-  if (reqLoan != null && monthlyRate != null && repayMonths != null) {
-    const pCap = getPCap(reqLoan, monthlyRate, moratorium, moratoriumMethod);
-    const emi = getEmi(pCap, monthlyRate, repayMonths);
-    
-    result.capitalized_principal = Number(roundCurrency(pCap)!.toFixed(2));
-    result.emi = Number(roundCurrency(emi)!.toFixed(2));
-    
-    if (inputs.maximum_affordable_emi == null) {
-      const totalRepayment = emi.mul(repayMonths);
-      const totalInt = totalRepayment.sub(reqLoan);
-      if (totalInt.greaterThanOrEqualTo(0)) {
-        result.total_interest = Number(roundCurrency(totalInt)!.toFixed(2));
-      }
-    }
+  let candLoan = reqLoan;
+  if (reqLoan != null && maxScheme != null) {
+      candLoan = Decimal.min(reqLoan, maxScheme);
   }
   
-  if (inputs.maximum_affordable_emi != null && monthlyRate != null && repayMonths != null) {
-    const maxEmi = new Decimal(inputs.maximum_affordable_emi);
+  let emiVal = null;
+  if (candLoan != null && monthlyRate != null && repayMonths != null) {
+    const pCap = getPCap(candLoan, monthlyRate, moratorium, moratoriumMethod);
+    emiVal = getEmi(pCap, monthlyRate, repayMonths);
+    
+    result.capitalized_principal = Number(roundCurrency(pCap)!.toFixed(2));
+    result.candidate_emi = Number(roundCurrency(emiVal)!.toFixed(2));
+    result.emi = Number(roundCurrency(emiVal)!.toFixed(2));
+    
+    const totalRepayment = emiVal.mul(repayMonths);
+    const totalInt = totalRepayment.sub(candLoan);
+    if (totalInt.greaterThanOrEqualTo(0)) {
+      result.total_interest = Number(roundCurrency(totalInt)!.toFixed(2));
+    }
+  }
+
+  let bizDscr = null;
+  if (result.business_cash_available_for_debt_service != null && emiVal != null && emiVal.greaterThan(0)) {
+    bizDscr = new Decimal(result.business_cash_available_for_debt_service).div(emiVal);
+    result.business_dscr = Number(roundCurrency(bizDscr)!.toFixed(2));
+  }
+
+  const minDscr = new Decimal(policy.minimum_required_dscr || "1.20");
+  const maxHhDebt = new Decimal(policy.maximum_household_debt_ratio || "0.50");
+
+  let maxEmi = null;
+  if (result.business_cash_available_for_debt_service != null) {
+    maxEmi = new Decimal(result.business_cash_available_for_debt_service).div(minDscr);
+    result.maximum_affordable_emi = Number(roundCurrency(maxEmi)!.toFixed(2));
+  }
+
+  let affP = null;
+  if (maxEmi != null && maxEmi.greaterThan(0) && monthlyRate != null && repayMonths != null) {
     const affPCap = getPFromEmi(maxEmi, monthlyRate, repayMonths);
-    const affP = getPFromPCap(affPCap, monthlyRate, moratorium, moratoriumMethod);
+    affP = getPFromPCap(affPCap, monthlyRate, moratorium, moratoriumMethod);
     result.affordable_loan_amount = Number(roundCurrency(affP)!.toFixed(2));
   }
   
-  if (affordableOverride != null && reqLoan != null && maxScheme != null) {
-    const minVal = Decimal.min(reqLoan, maxScheme, affordableOverride);
-    result.recommended_loan_amount = Number(roundCurrency(minVal)!.toFixed(2));
-  } else if (reqLoan != null && maxScheme != null) {
-    // for standard cases
-    const minVal = Decimal.min(reqLoan, maxScheme);
-    if (inputs.maximum_affordable_emi == null && affordableOverride == null && maxScheme.equals(125000)) {
-        // Just for the test, usually we calculate affordable
+  if (reqLoan != null && affP != null) {
+    let recLoan = Decimal.min(reqLoan, affP);
+    if (maxScheme != null) {
+      recLoan = Decimal.min(recLoan, maxScheme);
     }
+    result.recommended_loan_amount = Number(roundCurrency(recLoan)!.toFixed(2));
   }
   
   if (reqLoan != null && (repayMonths == null || rate == null)) {
@@ -137,14 +157,16 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
     result.missing_fields = missing;
   }
   
-  if ("monthly_household_nonbusiness_income" in inputs && inputs.monthly_household_nonbusiness_income === null) {
+  if (!("monthly_household_nonbusiness_income" in inputs) || inputs.monthly_household_nonbusiness_income === null) {
     result.household_affordability_status = "INSUFFICIENT_DATA";
     result.overall_readiness = "INCOMPLETE";
-    result.missing_fields = ["monthly_household_nonbusiness_income"];
+    if (!result.missing_fields) result.missing_fields = [];
+    result.missing_fields.push("monthly_household_nonbusiness_income");
   }
   
   const hhIncomeRaw = inputs.monthly_household_nonbusiness_income;
-  if (hhIncomeRaw != null) {
+  let hhPostRatio = null;
+  if (hhIncomeRaw != null && hhIncomeRaw !== "null") {
     const hhInc = new Decimal(hhIncomeRaw);
     const hhExp = new Decimal(inputs.monthly_household_essential_expenses || 0);
     const hhDebt = new Decimal(inputs.existing_monthly_household_debt_payments || 0);
@@ -165,33 +187,26 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
       result.household_income_status = "VALID";
     }
     
-    if (inputs.candidate_emi != null) {
-      const candEmi = new Decimal(inputs.candidate_emi);
-      const postDebt = hhDebt.add(candEmi);
+    if (emiVal != null) {
+      const postDebt = hhDebt.add(emiVal);
       result.post_loan_monthly_debt_payments = Number(roundCurrency(postDebt)!.toFixed(2));
       if (hhInc.equals(0)) {
         result.post_loan_household_debt_ratio = null;
       } else {
-        const postRatio = postDebt.div(hhInc);
-        result.post_loan_household_debt_ratio = Number(roundCurrency(postRatio)!.toFixed(2));
+        hhPostRatio = postDebt.div(hhInc);
+        result.post_loan_household_debt_ratio = Number(roundCurrency(hhPostRatio)!.toFixed(2));
       }
     }
   }
   
-  const bizDscr = inputs.business_dscr;
-  const hhPostRatio = inputs.post_loan_household_debt_ratio;
-  
   if (bizDscr != null && hhPostRatio != null) {
-    const minDscr = new Decimal(inputs.minimum_required_dscr || policy.minimum_required_dscr);
-    const maxHhDebt = new Decimal(inputs.maximum_household_debt_ratio || policy.maximum_household_debt_ratio);
-    
-    if (new Decimal(bizDscr).greaterThanOrEqualTo(minDscr)) {
+    if (bizDscr.greaterThanOrEqualTo(minDscr)) {
       result.business_affordability_status = "READY_FOR_FINANCE_REVIEW";
     } else {
       result.business_affordability_status = "HIGH_RISK";
     }
     
-    if (new Decimal(hhPostRatio).lessThanOrEqualTo(maxHhDebt)) {
+    if (hhPostRatio.lessThanOrEqualTo(maxHhDebt)) {
       result.household_affordability_status = "READY_FOR_FINANCE_REVIEW";
     } else {
       result.household_affordability_status = "HIGH_RISK";

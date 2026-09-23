@@ -1,7 +1,7 @@
 import json
 import os
 from decimal import Decimal, ROUND_HALF_UP, getcontext
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 from app.models.scheme import Scheme, SchemeRule
@@ -11,125 +11,131 @@ from app.models.finance_assessment import FinanceAssessment
 from app.schemas.finance_assessment import FinanceAssessmentRequest
 from app.services.finance_calculator import calculate_financial_assessment
 from app.services.legacy_adapters import normalize_legacy_business_assumption
+from app.services.scheme_matcher import evaluate_scheme_compatibility, select_best_rule
+from datetime import date
 
-# Set high precision for financial calculations
 getcontext().prec = 28
 TWO_PLACES = Decimal("0.01")
-FOUR_PLACES = Decimal("0.0001")
 
 def round_currency(value: Decimal) -> Decimal:
-    """Round a Decimal amount to 2 decimal places (currency)."""
+    if value is None:
+        return None
     return value.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
-
-def calculate_project_cost_from_margin(margin_contribution: Decimal) -> Decimal:
-    """Project Cost = Margin / 0.10 (assuming 10% entrepreneur margin contribution)."""
-    return round_currency(margin_contribution / Decimal("0.10"))
-
-def calculate_margin_from_cost(project_cost: Decimal) -> Decimal:
-    """Margin = Project Cost * 0.10 (10% entrepreneur contribution)."""
-    return round_currency(project_cost * Decimal("0.10"))
-
-def find_matching_scheme_rule(
-    project_cost: Decimal, db: Session, scheme_id: Optional[str] = None
-) -> Optional[SchemeRule]:
-    """Find active scheme rule matching the project cost range."""
-    query = select(SchemeRule).where(
-        SchemeRule.active == True,
-        SchemeRule.min_project_cost <= project_cost,
-        SchemeRule.max_project_cost >= project_cost,
-    )
-    if scheme_id:
-        query = query.where(SchemeRule.scheme_id == scheme_id)
-
-    query = query.order_by(desc(SchemeRule.min_project_cost))
-    return db.scalars(query).first()
 
 def assess_business_finance(
     business_id: str, request: FinanceAssessmentRequest, db: Session
 ) -> FinanceAssessment:
-    """
-    Perform deterministic financial assessment for a business using the pure golden-test logic.
-    """
-    # 1. Derive Project Cost and Margin Contribution
-    if request.project_cost is not None and request.project_cost > Decimal("0.00"):
-        project_cost = round_currency(request.project_cost)
-        margin_contribution = (
-            round_currency(request.margin_contribution)
-            if request.margin_contribution is not None
-            else calculate_margin_from_cost(project_cost)
-        )
-    elif request.margin_contribution is not None:
-        margin_contribution = round_currency(request.margin_contribution)
-        project_cost = calculate_project_cost_from_margin(margin_contribution)
-    else:
-        raise ValueError("Either project_cost or margin_contribution must be provided")
+    # 1. Gather all raw inputs
+    inputs = {
+        "monthly_units_sold": request.monthly_units_sold,
+        "selling_price_per_unit": request.selling_price_per_unit,
+        "variable_cost_per_unit": request.variable_cost_per_unit,
+        "monthly_labour_cost": request.monthly_labour_cost,
+        "monthly_rent": request.monthly_rent,
+        "monthly_transport_cost": request.monthly_transport_cost,
+        "monthly_other_fixed_cost": request.monthly_other_fixed_cost,
+        "requested_loan_amount": request.requested_loan_amount,
+        "working_capital_required": request.working_capital_required,
+        "monthly_household_nonbusiness_income": request.monthly_household_nonbusiness_income,
+        "monthly_household_essential_expenses": request.monthly_household_essential_expenses,
+        "existing_monthly_household_debt_payments": request.existing_monthly_household_debt_payments,
+    }
 
-    # 2. Match Scheme Rule
-    rule = find_matching_scheme_rule(project_cost, db, request.scheme_id or request.scheme_rule_id)
-    
-    annual_rate = None
-    total_tenure = None
-    moratorium_months = None
-    max_loan_cap = Decimal("999999999.00")
-    
-    if rule:
-        max_loan_cap = rule.max_loan_amount
-        annual_rate = rule.annual_interest_rate
-        total_tenure = rule.tenure_months
-        moratorium_months = rule.moratorium_months
-        scheme_id = rule.scheme_id
-        scheme_rule_id = rule.id
-    else:
-        scheme_id = request.scheme_id
-        scheme_rule_id = request.scheme_rule_id
-
-    # 3. Read latest assumption for business
+    # Fetch latest assumption to merge with request if necessary (legacy fallback)
     latest_assumption = db.scalars(
         select(BusinessAssumption)
         .where(BusinessAssumption.business_id == business_id)
         .order_by(desc(BusinessAssumption.created_at))
     ).first()
 
-    # 4. Prepare inputs for golden calculator
-    inputs = {
-        "requested_loan_amount": float(project_cost - margin_contribution),
-        "maximum_scheme_loan_amount": float(max_loan_cap),
+    if latest_assumption:
+        normalized = normalize_legacy_business_assumption(latest_assumption)
+        for k, v in normalized.items():
+            if inputs.get(k) is None:
+                inputs[k] = v
+
+    # Build profile for matcher
+    # We need project_cost = requested_loan_amount + margin_contribution? 
+    # Matcher uses "project_cost" and "requested_loan_amount". 
+    req_loan = inputs.get("requested_loan_amount")
+    profile = {
+        "requested_loan_amount": req_loan,
+        "project_cost": req_loan, # Assuming project cost ~ requested loan for matching if margin missing
     }
     
-    if annual_rate is not None:
-        inputs["annual_interest_rate_percent"] = float(annual_rate)
+    # 2. Match Scheme Rule
+    final_rule = None
+    freshness_policy = {"stale_after_hours": 720}
+    evaluation_date = date.today()
     
+    if request.scheme_rule_id:
+        rule = db.scalars(select(SchemeRule).where(SchemeRule.id == request.scheme_rule_id)).first()
+        if rule:
+            res = evaluate_scheme_compatibility(profile, rule.__dict__, evaluation_date, freshness_policy)
+            if res["status"] == "COMPATIBLE":
+                final_rule = rule
+    elif request.scheme_id:
+        rules = db.scalars(select(SchemeRule).where(SchemeRule.scheme_id == request.scheme_id)).all()
+        compatible = []
+        rules_by_id = {}
+        for r in rules:
+            rd = r.__dict__
+            rules_by_id[r.id] = rd
+            res = evaluate_scheme_compatibility(profile, rd, evaluation_date, freshness_policy)
+            if res["status"] == "COMPATIBLE":
+                compatible.append(res)
+        
+        if compatible:
+            best = select_best_rule(compatible, rules_by_id)
+            if best:
+                final_rule = next((r for r in rules if r.id == best["scheme_rule_id"]), None)
+
+    annual_rate = None
+    total_tenure = None
+    moratorium_months = None
+    max_loan_cap = None
+    
+    if final_rule:
+        max_loan_cap = final_rule.max_loan_amount
+        annual_rate = final_rule.annual_interest_rate
+        total_tenure = final_rule.tenure_months
+        moratorium_months = final_rule.moratorium_months
+        scheme_id = final_rule.scheme_id
+        scheme_rule_id = final_rule.id
+    else:
+        # If no verified rule, must rely on explicit user-supplied terms or fail
+        scheme_id = None
+        scheme_rule_id = None
+        # Could take from explicit inputs if we allowed manual scenario
+
+    if max_loan_cap is not None:
+        inputs["maximum_scheme_loan_amount"] = max_loan_cap
+    if annual_rate is not None:
+        inputs["annual_interest_rate_percent"] = annual_rate
     if total_tenure is not None and moratorium_months is not None:
-        active_tenure = total_tenure - moratorium_months
-        inputs["repayment_tenure_months"] = active_tenure
+        inputs["repayment_tenure_months"] = total_tenure - moratorium_months
         inputs["moratorium_months"] = moratorium_months
-        # Use the scheme rule's explicit method, or default to SIMPLE_CAPITALIZE per MUDRA/PMEGP norms
-        moratorium_method = getattr(rule, 'moratorium_interest_method', None) if rule else None
+        moratorium_method = getattr(final_rule, 'moratorium_interest_method', None) if final_rule else None
         if moratorium_method and moratorium_method in ("NONE", "SIMPLE_CAPITALIZE", "COMPOUND_CAPITALIZE"):
             inputs["moratorium_interest_method"] = moratorium_method
         else:
-            inputs["moratorium_interest_method"] = "SIMPLE_CAPITALIZE"
+            inputs["moratorium_interest_method"] = "NONE"
 
-    if latest_assumption:
-        normalized = normalize_legacy_business_assumption(latest_assumption)
-        inputs.update(normalized)
-
-    # 5. Load Policy
+    # 3. Load Policy
     policy_path = os.path.join(os.path.dirname(__file__), "../../../finance-spec/calculation-policy.json")
     try:
         with open(policy_path, "r") as f:
             policy = json.load(f)
     except Exception:
-        # Fallback if running from a different root
         policy = {
-            "minimum_business_dscr": 1.20,
+            "minimum_required_dscr": 1.20,
             "maximum_household_debt_ratio": 0.50
         }
 
-    # 6. Execute Deterministic Calculator
+    # 4. Execute Deterministic Calculator
     result = calculate_financial_assessment(inputs, policy)
 
-    # 7. Map Result back to DB Model
+    # 5. Map Result back to DB Model
     latest_assessment = db.scalars(
         select(FinanceAssessment)
         .where(FinanceAssessment.business_id == business_id)
@@ -142,7 +148,11 @@ def assess_business_finance(
     cap_prin = result.get("capitalized_principal")
     total_int = result.get("total_interest")
     dscr = result.get("business_dscr")
-    burden = Decimal(str(100.0 / dscr)) if dscr and dscr > 0 else Decimal("0.00")
+    burden = Decimal("100.0") / dscr if dscr and dscr > 0 else Decimal("0.00")
+    
+    # Fill in fallback required fields for DB schema compat
+    project_cost = inputs.get("requested_loan_amount", Decimal("0"))
+    margin_contribution = Decimal("0.00")
 
     assessment = FinanceAssessment(
         business_id=business_id,
@@ -150,7 +160,7 @@ def assess_business_finance(
         scheme_rule_id=scheme_rule_id,
         project_cost=project_cost,
         margin_contribution=margin_contribution,
-        maximum_loan=Decimal(str(result.get("maximum_scheme_loan_amount", max_loan_cap))),
+        maximum_loan=Decimal(str(result.get("maximum_scheme_loan_amount", "0"))),
         recommended_loan=Decimal(str(recommended_loan)) if recommended_loan is not None else None,
         annual_interest_rate=Decimal(str(annual_rate)) if annual_rate is not None else None,
         total_tenure_months=total_tenure,
@@ -160,7 +170,6 @@ def assess_business_finance(
         emi=Decimal(str(emi)) if emi is not None else None,
         total_interest=Decimal(str(total_int)) if total_int is not None else None,
         
-        # Canonical fields
         monthly_revenue=Decimal(str(result["monthly_revenue"])) if result.get("monthly_revenue") is not None else None,
         monthly_variable_cost=Decimal(str(result["monthly_variable_cost"])) if result.get("monthly_variable_cost") is not None else None,
         monthly_fixed_cost=Decimal(str(result["monthly_fixed_cost"])) if result.get("monthly_fixed_cost") is not None else None,
@@ -173,12 +182,11 @@ def assess_business_finance(
 
         debt_affordability_status=result.get("overall_readiness", "INSUFFICIENT_DATA"),
         debt_service_burden=round_currency(burden),
-        working_capital_requirement=request.working_capital_needed or Decimal("0.00"),
+        working_capital_requirement=inputs.get("working_capital_required", Decimal("0")),
         calculation_version=next_version,
         
-        # P1: Provenance fields
-        scheme_rule_version=rule.rule_version if rule else None,
-        scheme_last_verified_at=rule.last_verified_at if rule else None,
+        scheme_rule_version=final_rule.rule_version if final_rule else None,
+        scheme_last_verified_at=final_rule.last_verified_at if final_rule else None,
     )
 
     db.add(assessment)

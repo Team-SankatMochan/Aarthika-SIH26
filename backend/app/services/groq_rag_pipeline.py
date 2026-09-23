@@ -85,8 +85,7 @@ class GroqRAGPipeline:
 [BUSINESS PROFILE & FINANCIAL ESTIMATES]
 - Business Category: {state['business_category']}
 - Location: {state['location']}
-- Average startup cost: ₹{capital_float * 0.8:.0f} to ₹{capital_float * 1.2:.0f}
-- Monthly revenue potential: ₹{capital_float * 0.15:.0f} to ₹{capital_float * 0.25:.0f}
+- Note: External provider context injection disabled until Phase 2 P3 Evidence-based RAG.
 """
         return {
             "retrieved_context": retrieved_context,

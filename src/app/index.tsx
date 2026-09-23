@@ -168,12 +168,12 @@ export default function App() {
     lastName: '',
     mobile: '',
     age: '',
-    state: 'Chhattisgarh',
-    district: 'Raigarh',
-    village: 'Dharamjaigarh',
-    occupation: 'Farmer',
-    interestedSector: 'Farming',
-    hasExistingBusiness: 'No',
+    state: '',
+    district: '',
+    village: '',
+    occupation: '',
+    interestedSector: '',
+    hasExistingBusiness: '',
     profileImage: null,
   });
 
@@ -199,15 +199,15 @@ export default function App() {
   }, []);
 
   const [activeBusiness, setActiveBusiness] = useState({
-    sector: 'farming',
-    title: 'Organic Vegetable Farming',
-    setupCost: 95000,
-    monthlyFixed: 4000,
-    unitType: 'Kg',
-    pricePerUnit: 40,
-    costPerUnit: 18,
-    salesPerMonth: 1800,
-    personalCost: 8000,
+    sector: '',
+    title: '',
+    setupCost: 0,
+    monthlyFixed: 0,
+    unitType: '',
+    pricePerUnit: 0,
+    costPerUnit: 0,
+    salesPerMonth: 0,
+    personalCost: 0,
     breakdown: [
       { label: 'Drip Irrigation & Land Prep', cost: 45000 },
       { label: 'Certified Seeds & Bio-Fertilizer', cost: 30000 },
@@ -257,9 +257,9 @@ export default function App() {
   const handleLogin = async (mobile?: string, password?: string) => {
     const updated = (prev: any) => ({
       ...prev,
-      mobile: mobile || prev.mobile || '9876543210',
-      fullName: prev.fullName || 'Ramesh Kumar',
-      firstName: prev.firstName || 'Ramesh',
+      mobile: mobile || prev.mobile || '',
+      fullName: prev.fullName || '',
+      firstName: prev.firstName || '',
     });
     setUser(updated);
     setIsAuthenticated(true);
@@ -405,223 +405,7 @@ function MobileHeader() {
         <Image source={APP_LOGO} style={styles.logoImage} resizeMode="contain" />
       </Pressable>
 
-      <TouchableOpacity
-        style={styles.langButton}
-        onPress={() => setIsLangModalOpen(true)}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.langIcon}>🌐</Text>
-        <Text style={styles.langButtonText}>{langNames[currentLang] || 'English'}</Text>
-        <Text style={styles.dropdownArrow}>▼</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-// ----------------------------------------------------
-// BOTTOM TAB BAR COMPONENT
-// ----------------------------------------------------
-function BottomTabBar({ currentScreen, onNavigate, t }: any) {
-  const tabs = [
-    { key: 'home', label: t('nav_home') || 'Home', icon: '🏠' },
-    { key: 'my_plan', label: t('nav_my_plan') || 'My Plan', icon: '📋' },
-    { key: 'risk_test', label: t('nav_risk_test') || 'Risk Test', icon: '📊' },
-    { key: 'profile', label: t('nav_profile') || 'Profile', icon: '👤' },
-  ];
-
-  return (
-    <View style={styles.tabBar}>
-      {tabs.map((tab) => {
-        const isActive = currentScreen === tab.key;
-        return (
-          <TouchableOpacity
-            key={tab.key}
-            style={[styles.tabItem, isActive && styles.activeTabItem]}
-            onPress={() => onNavigate(tab.key)}
-            activeOpacity={0.7}
-          >
-            <View style={isActive ? styles.activeTabIconWrap : styles.tabIconWrap}>
-              <Text style={[styles.tabIcon, isActive && styles.activeTabIcon]}>{tab.icon}</Text>
-            </View>
-            <Text style={[styles.tabLabel, isActive && styles.activeTabLabel]}>{tab.label}</Text>
-            {isActive && <View style={styles.activeTabDot} />}
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-}
-
-// ----------------------------------------------------
-// SIGN UP SCREEN (FULLY LOCALIZED)
-// ----------------------------------------------------
-function SignUpScreen() {
-  const { handleSignup, navigateTo, t } = useApp();
-  const [fullName, setFullName] = useState('Ramesh Kumar');
-  const [mobile, setMobile] = useState('9876543210');
-  const [age, setAge] = useState('28');
-  const [state, setState] = useState('Chhattisgarh');
-  const [district, setDistrict] = useState('Raigarh');
-  const [village, setVillage] = useState('Dharamjaigarh');
-  const [occupation, setOccupation] = useState('Farmer');
-  const [interestedSector, setInterestedSector] = useState('Farming');
-  const [password, setPassword] = useState('123456');
-
-  const submit = () => {
-    if (!fullName.trim() || !mobile.trim()) {
-      Alert.alert('Required', 'Please enter your Full Name and Mobile Number.');
-      return;
-    }
-    const nameParts = fullName.trim().split(' ');
-    handleSignup({
-      fullName: fullName.trim(),
-      firstName: nameParts[0] || 'User',
-      lastName: nameParts.slice(1).join(' ') || '',
-      mobile: mobile.trim(),
-      age: age.trim() || '28',
-      state,
-      district,
-      village,
-      occupation,
-      hasExistingBusiness: 'No',
-      interestedSector,
-      password: password || '123456',
-    });
-  };
-
-  return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1 }}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.authHeader}>
-          <Text style={styles.authTitle}>{t('create_account_title') || 'Create Your Account'}</Text>
-          <Text style={styles.authSubtitle}>
-            {t('create_account_sub') || 'Join Aarthika to plan your business simply and securely.'}
-          </Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.inputLabel}>{t('full_name') || 'Full Name'}</Text>
-          <TextInput
-            style={styles.textInput}
-            value={fullName}
-            onChangeText={setFullName}
-            placeholderTextColor={COLORS.outlineVariant}
-          />
-
-          <Text style={styles.inputLabel}>{t('mobile_number') || 'Mobile Number'}</Text>
-          <TextInput
-            style={styles.textInput}
-            keyboardType="phone-pad"
-            value={mobile}
-            onChangeText={setMobile}
-            placeholderTextColor={COLORS.outlineVariant}
-          />
-
-          <Text style={styles.inputLabel}>{t('age_dob') || 'Age / Date of Birth'}</Text>
-          <TextInput
-            style={styles.textInput}
-            keyboardType="number-pad"
-            value={age}
-            onChangeText={setAge}
-            placeholderTextColor={COLORS.outlineVariant}
-          />
-
-          <View style={styles.row}>
-            <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.inputLabel}>{t('state') || 'State'}</Text>
-              <TextInput style={styles.textInput} value={state} onChangeText={setState} />
-            </View>
-            <View style={{ flex: 1, marginLeft: 8 }}>
-              <Text style={styles.inputLabel}>{t('district') || 'District'}</Text>
-              <TextInput style={styles.textInput} value={district} onChangeText={setDistrict} />
-            </View>
-          </View>
-
-          <Text style={styles.inputLabel}>{t('village_town') || 'Village / Town'}</Text>
-          <TextInput style={styles.textInput} value={village} onChangeText={setVillage} />
-
-          <Text style={styles.inputLabel}>{t('current_occupation') || 'Current Occupation'}</Text>
-          <TextInput style={styles.textInput} value={occupation} onChangeText={setOccupation} />
-
-          <Text style={styles.inputLabel}>{t('interested_business') || 'Interested Business Sector'}</Text>
-          <TextInput style={styles.textInput} value={interestedSector} onChangeText={setInterestedSector} />
-
-          <Text style={styles.inputLabel}>{t('create_password') || 'Create Password'}</Text>
-          <TextInput style={styles.textInput} secureTextEntry value={password} onChangeText={setPassword} />
-
-          <TouchableOpacity style={styles.primaryButton} onPress={submit} activeOpacity={0.8}>
-            <Text style={styles.primaryButtonText}>{t('create_account_btn') || 'Create Account →'}</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.switchAuthContainer}>
-          <Text style={styles.switchAuthText}>{t('already_have_account') || 'Already have an account? '}</Text>
-          <TouchableOpacity onPress={() => navigateTo('login')}>
-            <Text style={styles.switchAuthLink}>{t('log_in_link') || 'Log In'}</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
-  );
-}
-
-// ----------------------------------------------------
-// LOGIN SCREEN (FULLY LOCALIZED)
-// ----------------------------------------------------
-function LoginScreen() {
-  const { handleLogin, navigateTo, t } = useApp();
-  const [mobile, setMobile] = useState('9876543210');
-  const [password, setPassword] = useState('password123');
-
-  return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.authHeader}>
-        <Image
-          source={APP_LOGO}
-          style={[styles.logoImage, { width: 160, height: 60, marginBottom: 8 }]}
-          resizeMode="contain"
-        />
-        <Text style={styles.authTitle}>{t('welcome_back_title') || 'Welcome Back'}</Text>
-        <Text style={styles.authSubtitle}>
-          {t('welcome_back_sub') || 'Log in to manage your business with clarity.'}
-        </Text>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.inputLabel}>{t('mobile_number') || 'Mobile Number'}</Text>
-        <TextInput
-          style={styles.textInput}
-          keyboardType="phone-pad"
-          value={mobile}
-          onChangeText={setMobile}
-        />
-
-        <Text style={styles.inputLabel}>{t('password_label') || 'Password'}</Text>
-        <TextInput
-          style={styles.textInput}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => handleLogin(mobile, password)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.primaryButtonText}>{t('log_in_btn') || 'Log In →'}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.demoButton}
-          onPress={() => handleLogin('9876543210', 'demo')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.demoButtonText}>{t('quick_demo_login') || '⚡ Quick Demo Login'}</Text>
-        </TouchableOpacity>
+      
       </View>
 
       <View style={styles.switchAuthContainer}>

@@ -10,15 +10,10 @@ def round_currency(value: Decimal) -> Decimal:
     return value.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
 def calculate_financial_assessment(inputs: Dict[str, Any], policy: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Pure function to evaluate financial logic according to Phase 1 spec.
-    """
     result = {}
     
-    # Extract inputs with defaults
+    # Extract root business inputs
     req_loan = Decimal(str(inputs.get("requested_loan_amount", "0"))) if inputs.get("requested_loan_amount") is not None else None
-    max_scheme = Decimal(str(inputs.get("maximum_scheme_loan_amount", "999999999"))) if inputs.get("maximum_scheme_loan_amount") is not None else None
-    affordable_loan_override = inputs.get("affordable_loan_amount")
     
     rate = inputs.get("annual_interest_rate_percent")
     if rate is not None:
@@ -28,18 +23,26 @@ def calculate_financial_assessment(inputs: Dict[str, Any], policy: Dict[str, Any
     moratorium = inputs.get("moratorium_months", 0)
     moratorium_method = inputs.get("moratorium_interest_method", "NONE")
     
-    # 1. Business Cashflow
     units_sold = inputs.get("monthly_units_sold")
     price = inputs.get("selling_price_per_unit")
     var_cost = inputs.get("variable_cost_per_unit")
-    fixed_cost = inputs.get("monthly_fixed_cost")
+    
+    if "monthly_fixed_cost" in inputs and inputs["monthly_fixed_cost"] is not None:
+        fixed_cost = Decimal(str(inputs["monthly_fixed_cost"]))
+    else:
+        labour = Decimal(str(inputs.get("monthly_labour_cost", 0)))
+        rent = Decimal(str(inputs.get("monthly_rent", 0)))
+        transport = Decimal(str(inputs.get("monthly_transport_cost", 0)))
+        other_fixed = Decimal(str(inputs.get("monthly_other_fixed_cost", 0)))
+        fixed_cost = labour + rent + transport + other_fixed
+        
+    result["monthly_fixed_cost"] = round_currency(fixed_cost)
             
-    if price is not None and var_cost is not None and fixed_cost is not None:
+    if price is not None and var_cost is not None:
         cm = Decimal(str(price)) - Decimal(str(var_cost))
         result["unit_contribution_margin"] = round_currency(cm)
-        fc = Decimal(str(fixed_cost))
         if cm > Decimal("0"):
-            be = fc / cm
+            be = fixed_cost / cm
             result["break_even_units"] = int(be.to_integral_value(rounding=ROUND_HALF_UP))
             result["break_even_status"] = "VIABLE"
         elif cm == Decimal("0"):
@@ -49,22 +52,17 @@ def calculate_financial_assessment(inputs: Dict[str, Any], policy: Dict[str, Any
             result["break_even_units"] = None
             result["break_even_status"] = "STRUCTURALLY_UNVIABLE"
             
-    if units_sold is not None and price is not None and var_cost is not None and fixed_cost is not None:
+    if units_sold is not None and price is not None and var_cost is not None:
         rev = Decimal(str(units_sold)) * Decimal(str(price))
         vc = Decimal(str(units_sold)) * Decimal(str(var_cost))
-        fc = Decimal(str(fixed_cost))
-        surplus = rev - (vc + fc)
+        surplus = rev - (vc + fixed_cost)
         
-        prefix = ""
-        result[f"{prefix}monthly_revenue"] = round_currency(rev)
-        result[f"{prefix}monthly_variable_cost"] = round_currency(vc)
-        result[f"{prefix}monthly_fixed_cost"] = round_currency(fc)
-        result[f"{prefix}monthly_operating_surplus"] = round_currency(surplus)
-        result[f"{prefix}business_cash_available_for_debt_service"] = round_currency(surplus)
+        result["monthly_revenue"] = round_currency(rev)
+        result["monthly_variable_cost"] = round_currency(vc)
+        result["monthly_operating_surplus"] = round_currency(surplus)
+        result["business_cash_available_for_debt_service"] = round_currency(surplus)
 
-            
     # 2. Loan Calculations
-    # Helper to calculate P_cap
     def get_p_cap(p: Decimal, r: Decimal, m: int, method: str) -> Decimal:
         if method == "NONE" or m == 0:
             return p
@@ -101,31 +99,53 @@ def calculate_financial_assessment(inputs: Dict[str, Any], policy: Dict[str, Any
     if rate is not None:
         monthly_rate = (rate / Decimal("100")) / Decimal("12")
         
-    if req_loan is not None and monthly_rate is not None and repay_months is not None:
-        p_cap = get_p_cap(req_loan, monthly_rate, moratorium, moratorium_method)
+    # Candidate scheme loan = min(requested, verified_scheme_max)
+    max_scheme = inputs.get("maximum_scheme_loan_amount")
+    max_scheme = Decimal(str(max_scheme)) if max_scheme is not None else None
+    
+    if req_loan is not None:
+        cand_loan = min(req_loan, max_scheme) if max_scheme is not None else req_loan
+    else:
+        cand_loan = None
+
+    emi = None
+    if cand_loan is not None and monthly_rate is not None and repay_months is not None:
+        p_cap = get_p_cap(cand_loan, monthly_rate, moratorium, moratorium_method)
         emi = get_emi(p_cap, monthly_rate, repay_months)
         
         result["capitalized_principal"] = round_currency(p_cap)
+        result["candidate_emi"] = round_currency(emi)
         result["emi"] = round_currency(emi)
         
-        if "maximum_affordable_emi" not in inputs:
-            # Test 1, 2, 3, 4 total interest
-            total_repayment = emi * Decimal(repay_months)
-            total_int = total_repayment - req_loan
-            if total_int >= Decimal("0"):
-                result["total_interest"] = round_currency(total_int)
+        total_repayment = emi * Decimal(repay_months)
+        total_int = total_repayment - cand_loan
+        if total_int >= Decimal("0"):
+            result["total_interest"] = round_currency(total_int)
 
-    # Inverse EMI
-    if inputs.get("maximum_affordable_emi") is not None and monthly_rate is not None and repay_months is not None:
-        max_emi = Decimal(str(inputs.get("maximum_affordable_emi")))
+    biz_dscr = None
+    if "business_cash_available_for_debt_service" in result and emi is not None and emi > 0:
+        biz_dscr = result["business_cash_available_for_debt_service"] / emi
+        result["business_dscr"] = round_currency(biz_dscr)
+
+    min_dscr = Decimal(str(policy.get("minimum_required_dscr", "1.20")))
+    max_hh_debt = Decimal(str(policy.get("maximum_household_debt_ratio", "0.50")))
+
+    # Max affordable EMI = CFADS / min_dscr
+    max_emi = None
+    if "business_cash_available_for_debt_service" in result:
+        max_emi = result["business_cash_available_for_debt_service"] / min_dscr
+        result["maximum_affordable_emi"] = round_currency(max_emi)
+
+    aff_p = None
+    if max_emi is not None and max_emi > 0 and monthly_rate is not None and repay_months is not None:
         aff_p_cap = get_p_from_emi(max_emi, monthly_rate, repay_months)
         aff_p = get_p_from_p_cap(aff_p_cap, monthly_rate, moratorium, moratorium_method)
         result["affordable_loan_amount"] = round_currency(aff_p)
 
-    # Recommended Loan Logic
-    if affordable_loan_override is not None:
-        affordable_p = Decimal(str(affordable_loan_override))
-        rec_loan = min(req_loan, max_scheme, affordable_p)
+    if req_loan is not None and aff_p is not None:
+        rec_loan = min(req_loan, aff_p)
+        if max_scheme is not None:
+            rec_loan = min(rec_loan, max_scheme)
         result["recommended_loan_amount"] = round_currency(rec_loan)
         
     # Readiness states (Missing loan terms)
@@ -138,13 +158,16 @@ def calculate_financial_assessment(inputs: Dict[str, Any], policy: Dict[str, Any
         result["missing_fields"] = missing
 
     # Missing household fields
-    if "monthly_household_nonbusiness_income" in inputs and inputs["monthly_household_nonbusiness_income"] is None:
+    if "monthly_household_nonbusiness_income" not in inputs or inputs["monthly_household_nonbusiness_income"] is None:
         result["household_affordability_status"] = "INSUFFICIENT_DATA"
         result["overall_readiness"] = "INCOMPLETE"
-        result["missing_fields"] = ["monthly_household_nonbusiness_income"]
+        if "missing_fields" not in result:
+            result["missing_fields"] = []
+        result["missing_fields"].append("monthly_household_nonbusiness_income")
 
     # Household cashflow
     hh_income_raw = inputs.get("monthly_household_nonbusiness_income")
+    hh_post_ratio = None
     if hh_income_raw is not None and hh_income_raw != "null":
         hh_inc = Decimal(str(hh_income_raw))
         hh_exp = Decimal(str(inputs.get("monthly_household_essential_expenses", "0")))
@@ -165,27 +188,16 @@ def calculate_financial_assessment(inputs: Dict[str, Any], policy: Dict[str, Any
             result["household_buffer_ratio"] = round_currency(buf_ratio)
             result["household_income_status"] = "VALID"
             
-        cand_emi = inputs.get("candidate_emi")
-        if cand_emi is not None:
-            cand_emi = Decimal(str(cand_emi))
-            post_debt = hh_debt + cand_emi
+        if emi is not None:
+            post_debt = hh_debt + emi
             result["post_loan_monthly_debt_payments"] = round_currency(post_debt)
             if hh_inc == Decimal("0"):
                 result["post_loan_household_debt_ratio"] = None
             else:
-                post_ratio = post_debt / hh_inc
-                result["post_loan_household_debt_ratio"] = round_currency(post_ratio)
+                hh_post_ratio = post_debt / hh_inc
+                result["post_loan_household_debt_ratio"] = round_currency(hh_post_ratio)
                 
-    # Viability status cross-check
-    biz_dscr = inputs.get("business_dscr")
-    hh_post_ratio = inputs.get("post_loan_household_debt_ratio")
-    
     if biz_dscr is not None and hh_post_ratio is not None:
-        biz_dscr = Decimal(str(biz_dscr))
-        hh_post_ratio = Decimal(str(hh_post_ratio))
-        min_dscr = Decimal(str(inputs.get("minimum_required_dscr", policy["minimum_required_dscr"])))
-        max_hh_debt = Decimal(str(inputs.get("maximum_household_debt_ratio", policy["maximum_household_debt_ratio"])))
-        
         if biz_dscr >= min_dscr:
             result["business_affordability_status"] = "READY_FOR_FINANCE_REVIEW"
         else:
@@ -200,5 +212,5 @@ def calculate_financial_assessment(inputs: Dict[str, Any], policy: Dict[str, Any
             result["overall_readiness"] = "READY_FOR_FINANCE_REVIEW"
         else:
             result["overall_readiness"] = "HIGH_RISK"
-
+            
     return result

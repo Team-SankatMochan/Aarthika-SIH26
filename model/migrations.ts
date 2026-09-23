@@ -2,6 +2,39 @@ import { schemaMigrations, createTable, addColumns } from '@nozbe/watermelondb/S
 
 export default schemaMigrations({
     migrations: [
+        {
+            toVersion: 4,
+            steps: [
+                addColumns({
+                    table: 'evidence',
+                    columns: [
+                        { name: 'source_type', type: 'string', isOptional: true },
+                        { name: 'provider_id', type: 'string', isOptional: true },
+                        { name: 'provider_record_id', type: 'string', isOptional: true },
+                        { name: 'source_name', type: 'string', isOptional: true },
+                        { name: 'source_url', type: 'string', isOptional: true },
+                        { name: 'metric_name', type: 'string', isOptional: true },
+                        { name: 'numeric_value', type: 'string', isOptional: true },
+                        { name: 'text_value', type: 'string', isOptional: true },
+                        { name: 'boolean_value', type: 'boolean', isOptional: true },
+                        { name: 'observation_date', type: 'number', isOptional: true },
+                        { name: 'retrieved_at', type: 'number', isOptional: true },
+                        { name: 'state', type: 'string', isOptional: true },
+                        { name: 'district', type: 'string', isOptional: true },
+                        { name: 'commodity', type: 'string', isOptional: true },
+                        { name: 'market_id', type: 'string', isOptional: true },
+                        { name: 'market_name', type: 'string', isOptional: true },
+                        { name: 'price_type', type: 'string', isOptional: true },
+                        { name: 'currency', type: 'string', isOptional: true },
+                        { name: 'quantity_unit', type: 'string', isOptional: true },
+                        { name: 'content_hash', type: 'string', isOptional: true },
+                        { name: 'derivation_type', type: 'string', isOptional: true },
+                        { name: 'derivation_version', type: 'string', isOptional: true }
+                    ],
+                }),
+            ],
+        },
+
         // Migration from v2 to v3 - Add Phase 2 P1 fields
         {
             toVersion: 3,
@@ -56,7 +89,6 @@ export default schemaMigrations({
                         { name: 'latitude', type: 'number', isOptional: true },
                         { name: 'longitude', type: 'number', isOptional: true },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],
@@ -75,7 +107,6 @@ export default schemaMigrations({
                         { name: 'preferences', type: 'string', isOptional: true },
                         { name: 'risk_tolerance', type: 'string', isOptional: true },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],
@@ -90,7 +121,6 @@ export default schemaMigrations({
                         { name: 'description', type: 'string', isOptional: true },
                         { name: 'status', type: 'string' },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],
@@ -131,7 +161,6 @@ export default schemaMigrations({
                         { name: 'assumption_source', type: 'string' },
                         { name: 'confidence', type: 'number', isOptional: true },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],
@@ -145,7 +174,6 @@ export default schemaMigrations({
                         { name: 'description', type: 'string', isOptional: true },
                         { name: 'status', type: 'string' },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],
@@ -181,7 +209,6 @@ export default schemaMigrations({
                         { name: 'start_date', type: 'number', isOptional: true },
                         { name: 'end_date', type: 'number', isOptional: true },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],
@@ -212,7 +239,6 @@ export default schemaMigrations({
                         { name: 'description', type: 'string', isOptional: true },
                         { name: 'active', type: 'boolean' },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],
@@ -232,7 +258,6 @@ export default schemaMigrations({
                         { name: 'effective_to', type: 'number', isOptional: true },
                         { name: 'active', type: 'boolean' },
                         { name: 'created_at', type: 'number' },
-                        { name: 'server_revision', type: 'number', isOptional: true },
                         { name: 'updated_at', type: 'number' },
                         { name: 'server_revision', type: 'number', isOptional: true },
                     ],

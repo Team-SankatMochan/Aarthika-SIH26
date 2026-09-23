@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export default appSchema({
-    version: 3,
+    version: 4,
     tables: [
         // ─── Core Entities ─────────────────────────────────────────
 
@@ -248,18 +248,29 @@ export default appSchema({
         // ─── Evidence & Decisions ──────────────────────────────────
 
         tableSchema({
-            name: 'evidence',
-            columns: [
-                { name: 'business_id', type: 'string', isIndexed: true },
-                { name: 'evidence_type', type: 'string' }, // market, pilot, financial, customer
-                { name: 'source', type: 'string' },
-                { name: 'description', type: 'string' },
-                { name: 'value', type: 'number', isOptional: true },
-                { name: 'confidence', type: 'number', isOptional: true },
-                { name: 'is_observed', type: 'boolean' },
-                { name: 'is_estimated', type: 'boolean' },
-                { name: 'created_at', type: 'number' },
-                { name: 'server_revision', type: 'number', isOptional: true },
+            
+                { name: 'source_type', type: 'string', isOptional: true },
+                { name: 'provider_id', type: 'string', isOptional: true },
+                { name: 'provider_record_id', type: 'string', isOptional: true },
+                { name: 'source_name', type: 'string', isOptional: true },
+                { name: 'source_url', type: 'string', isOptional: true },
+                { name: 'metric_name', type: 'string', isOptional: true },
+                { name: 'numeric_value', type: 'string', isOptional: true },
+                { name: 'text_value', type: 'string', isOptional: true },
+                { name: 'boolean_value', type: 'boolean', isOptional: true },
+                { name: 'observation_date', type: 'number', isOptional: true },
+                { name: 'retrieved_at', type: 'number', isOptional: true },
+                { name: 'state', type: 'string', isOptional: true },
+                { name: 'district', type: 'string', isOptional: true },
+                { name: 'commodity', type: 'string', isOptional: true },
+                { name: 'market_id', type: 'string', isOptional: true },
+                { name: 'market_name', type: 'string', isOptional: true },
+                { name: 'price_type', type: 'string', isOptional: true },
+                { name: 'currency', type: 'string', isOptional: true },
+                { name: 'quantity_unit', type: 'string', isOptional: true },
+                { name: 'content_hash', type: 'string', isOptional: true },
+                { name: 'derivation_type', type: 'string', isOptional: true },
+                { name: 'derivation_version', type: 'string', isOptional: true },
             ],
         }),
 

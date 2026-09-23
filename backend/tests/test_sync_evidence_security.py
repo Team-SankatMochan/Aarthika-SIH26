@@ -132,7 +132,7 @@ def test_client_update_user_entered_accepted(db_session, sync_business):
                 updated=[
                     {
                         "id": ev.id,
-                        "sync_revision": current_rev,
+                        "base_server_revision": current_rev,
                         "numeric_value": "120.0000",
                     }
                 ],

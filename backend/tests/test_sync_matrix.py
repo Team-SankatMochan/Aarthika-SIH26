@@ -100,7 +100,7 @@ def test_sync_matrix_07_08_optimistic_concurrency_strict_equality(db_session):
     # base < current -> Conflict
     sync_req1 = SyncRequest(
         sync_request_id=mock_uuid(),
-        changes={"users": TableChanges(updated=[{"id": u.id, "name": "Stale", "sync_revision": server_rev - 1}])}
+        changes={"users": TableChanges(updated=[{"id": u.id, "name": "Stale", "base_server_revision": server_rev - 1}])}
     )
     res1 = process_sync_request(sync_req1, db_session)
     assert len(res1.conflicts) == 1
@@ -108,7 +108,7 @@ def test_sync_matrix_07_08_optimistic_concurrency_strict_equality(db_session):
     # base > current -> Conflict (Client shouldn't have a future revision)
     sync_req2 = SyncRequest(
         sync_request_id=mock_uuid(),
-        changes={"users": TableChanges(updated=[{"id": u.id, "name": "Future", "sync_revision": server_rev + 1}])}
+        changes={"users": TableChanges(updated=[{"id": u.id, "name": "Future", "base_server_revision": server_rev + 1}])}
     )
     res2 = process_sync_request(sync_req2, db_session)
     assert len(res2.conflicts) == 1
@@ -116,7 +116,7 @@ def test_sync_matrix_07_08_optimistic_concurrency_strict_equality(db_session):
     # base == current -> Success
     sync_req3 = SyncRequest(
         sync_request_id=mock_uuid(),
-        changes={"users": TableChanges(updated=[{"id": u.id, "name": "Success", "sync_revision": server_rev}])}
+        changes={"users": TableChanges(updated=[{"id": u.id, "name": "Success", "base_server_revision": server_rev}])}
     )
     res3 = process_sync_request(sync_req3, db_session)
     assert len(res3.conflicts) == 0

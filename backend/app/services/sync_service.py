@@ -235,7 +235,7 @@ def process_sync_request(sync_req: SyncRequest, db: Session) -> SyncResponse:
                         row_dict["source_type"] = "USER_ENTERED"
 
                     # Optimistic Concurrency Check
-                    client_base = row_dict.get('sync_revision', 0)
+                    client_base = row_dict.get('base_server_revision', 0)
                     server_rev = getattr(existing, 'server_revision', 0)
                     if server_rev > 0 and client_base != server_rev:
                         # Conflict!

@@ -18,11 +18,6 @@ def round_cur(val: Decimal) -> Decimal:
 def run_stress_test_for_business(
     business_id: str, request: StressTestRunRequest, db: Session
 ) -> StressTest:
-    """
-    Execute deterministic Crash Test simulation for a business.
-    Calculates scenario impacts on Revenue, Costs, Cash Surplus, Debt Repayment Burden,
-    Working Capital Pressure, Break Even, and Resilience Score.
-    """
     # 1. Fetch base assumption
     if request.assumption_id:
         assumption = db.scalars(
@@ -67,7 +62,7 @@ def run_stress_test_for_business(
     
     base_operating_cost = round_cur(base_raw_mat + base_fixed_costs)
     base_surplus = round_cur(base_revenue - base_operating_cost)
-    base_working_cap = Decimal(str(assumption.working_capital_required if assumption.working_capital_required is not None else (assumption.working_capital or 15000)))
+    base_working_cap = Decimal(str(assumption.working_capital_required if assumption.working_capital_required is not None else (assumption.working_capital or 0)))
 
     # 4. Create StressTest record
     stress_test = StressTest(
@@ -87,7 +82,7 @@ def run_stress_test_for_business(
             "pct": Decimal("-20.00"),
             "vol_factor": Decimal("0.80"),
             "price_factor": Decimal("1.00"),
-            "raw_mat_factor": Decimal("1.00"),  # applies to unit or scaled vol
+            "raw_mat_factor": Decimal("1.00"),  
             "fixed_cost_factor": Decimal("1.00"),
             "wc_factor": Decimal("1.10"),
         },
@@ -124,7 +119,7 @@ def run_stress_test_for_business(
             "vol_factor": Decimal("1.00"),
             "price_factor": Decimal("1.00"),
             "raw_mat_factor": Decimal("1.00"),
-            "fixed_cost_factor": Decimal("1.20"), # simplified approximation for the shock
+            "fixed_cost_factor": Decimal("1.20"), 
             "wc_factor": Decimal("1.15"),
         },
         "SEASONAL_DEMAND_DROP": {
@@ -176,25 +171,37 @@ def run_stress_test_for_business(
         unit_var_cost = (
             (sim_raw_mat / (base_monthly_vol * cfg["vol_factor"]))
             if (base_monthly_vol * cfg["vol_factor"]) > Decimal("0.00")
-            else Decimal("1.00")
+            else Decimal("0.00")
         )
         unit_contrib = unit_price - unit_var_cost
-        break_even_units = (
-            round_cur(sim_fixed / unit_contrib)
-            if unit_contrib > Decimal("0.00")
-            else Decimal("99999.00")
-        )
+        
+        if unit_contrib > Decimal("0.00"):
+            break_even_units = round_cur(sim_fixed / unit_contrib)
+        else:
+            break_even_units = None
 
         # Resilience calculation
-        if sim_cash_surplus > (monthly_emi * Decimal("1.50")):
-            resilience_score = Decimal("88.00")
-            result_status = "SURVIVES"
-        elif sim_cash_surplus >= monthly_emi:
-            resilience_score = Decimal("62.00")
-            result_status = "AT_RISK"
+        if monthly_emi > Decimal("0"):
+            dscr = sim_cash_surplus / monthly_emi
+            if dscr >= Decimal("1.50"):
+                resilience_score = Decimal("100.00")
+                result_status = "SURVIVES"
+            elif dscr >= Decimal("1.00"):
+                resilience_score = round_cur(dscr * Decimal("50.00"))
+                result_status = "AT_RISK"
+            elif dscr > Decimal("0"):
+                resilience_score = round_cur(dscr * Decimal("30.00"))
+                result_status = "INSOLVENT"
+            else:
+                resilience_score = Decimal("0.00")
+                result_status = "INSOLVENT"
         else:
-            resilience_score = Decimal("25.00")
-            result_status = "INSOLVENT"
+            if sim_cash_surplus > Decimal("0"):
+                resilience_score = Decimal("100.00")
+                result_status = "SURVIVES"
+            else:
+                resilience_score = Decimal("0.00")
+                result_status = "INSOLVENT"
 
         scenario = StressTestScenario(
             stress_test_id=stress_test.id,

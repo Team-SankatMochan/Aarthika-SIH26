@@ -1,12 +1,32 @@
 import { synchronize } from '@nozbe/watermelondb/sync';
 import { database } from '../../model';
+import { v4 as uuidv4 } from 'uuid';
+
+// Expect a configurable base URL, fallback to localhost for dev only if not set, but not hardcoded production.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function syncData() {
+    const syncRequestId = uuidv4();
+    
     await synchronize({
         database,
         pullChanges: async ({ lastPulledAt, schemaVersion, migration }) => {
-            const urlParams = lastPulledAt ? `?lastPulledAt=${lastPulledAt}` : '';
-            const response = await fetch(`http://localhost:8000/api/sync/pull${urlParams}`);
+            const response = await fetch(`${BASE_URL}/api/sync`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    sync_request_id: syncRequestId,
+                    lastPulledAt,
+                    changes: {
+                        businesses: { created: [], updated: [], deleted: [] },
+                        business_assumptions: { created: [], updated: [], deleted: [] },
+                        finance_assessments: { created: [], updated: [], deleted: [] },
+                        decisions: { created: [], updated: [], deleted: [] },
+                        evidence: { created: [], updated: [], deleted: [] }
+                    }
+                }),
+            });
+            
             if (!response.ok) {
                 throw new Error(`[Sync] Pull failed: ${response.statusText}`);
             }
@@ -14,7 +34,7 @@ export async function syncData() {
             const { changes, timestamp } = await response.json();
             
             // Map sync_revision to server_revision
-            for (const table of Object.keys(changes)) {
+            for (const table of Object.keys(changes || {})) {
                 for (const op of ['created', 'updated']) {
                     if (changes[table][op]) {
                         for (const record of changes[table][op]) {
@@ -45,15 +65,22 @@ export async function syncData() {
                 }
             }
 
-            const response = await fetch(`http://localhost:8000/api/sync/push`, {
+            const response = await fetch(`${BASE_URL}/api/sync`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ changes, lastPulledAt }),
+                body: JSON.stringify({ 
+                    sync_request_id: syncRequestId, 
+                    lastPulledAt, 
+                    changes 
+                }),
             });
             if (!response.ok) {
-                throw new Error(`[Sync] Push failed: ${response.statusText}`);
+                const resText = await response.text();
+                // We should theoretically handle conflicts explicitly, 
+                // but at minimum we throw so the app knows it failed.
+                throw new Error(`[Sync] Push failed: ${response.status} - ${resText}`);
             }
         },
         migrationsEnabledAtVersion: 1,
