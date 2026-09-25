@@ -19,7 +19,7 @@ export const RepaymentTimeline: React.FC<Props> = ({ loanAmount, moratoriumMonth
           <View style={[styles.dot, { backgroundColor: '#8e4e14' }]} />
           <View style={styles.content}>
             <Text style={styles.stepTitle}>लोन की शुरुआत</Text>
-            <Text style={styles.stepDesc}>₹{loanAmount.toLocaleString('en-IN')} मिलेंगे</Text>
+            <Text style={styles.stepDesc}>योजना नियमों के अनुसार अधिकतम संभावित राशि: ₹{loanAmount.toLocaleString('en-IN')}</Text>
           </View>
         </View>
         

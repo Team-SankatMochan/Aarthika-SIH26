@@ -27,13 +27,13 @@ export const SchemeRoutePath: React.FC<Props> = ({ schemeResult }) => {
       <View style={[styles.routeBox, isMicroFinance ? styles.activeRoute : styles.inactiveRoute]}>
         <Text style={styles.routeName}>Micro Finance Scheme</Text>
         <Text style={styles.routeDetail}>Project Cost up to ₹1.40L</Text>
-        {isMicroFinance && <Text style={styles.matchedText}>✓ यह आपके लिए सही है</Text>}
+        {isMicroFinance && <Text style={styles.matchedText}>✓ आपकी दी गई जानकारी से यह financing route मेल खाता है</Text>}
       </View>
 
       <View style={[styles.routeBox, !isMicroFinance ? styles.activeRoute : styles.inactiveRoute]}>
         <Text style={styles.routeName}>Term Loan Scheme</Text>
         <Text style={styles.routeDetail}>Project Cost above ₹1.40L to ₹50L</Text>
-        {!isMicroFinance && <Text style={styles.matchedText}>✓ यह आपके लिए सही है</Text>}
+        {!isMicroFinance && <Text style={styles.matchedText}>✓ आपकी दी गई जानकारी से यह financing route मेल खाता है</Text>}
       </View>
     </View>
   );

@@ -9,6 +9,7 @@ import { TrustBadge } from '../components/rural/TrustBadge';
 import { HyperLocalMarketRadar } from '../components/rural/HyperLocalMarketRadar';
 import { SchemeRoutePath } from '../components/rural/SchemeRoutePath';
 import { RepaymentTimeline } from '../components/rural/RepaymentTimeline';
+import { RealityCheckCard } from '../components/rural/RealityCheckCard';
 import { SafetySplitView } from '../components/rural/SafetySplitView';
 import { StressSimulatorGrid } from '../components/rural/StressSimulatorGrid';
 import { ReadinessResult } from '../components/rural/ReadinessResult';
@@ -22,6 +23,8 @@ export default function RuralInterviewScreen() {
   const inputs = globalInputStore.getConfirmedValues();
   const [showStructuring, setShowStructuring] = useState(false);
   const [assessmentResult, setAssessmentResult] = useState<any>(null);
+  const [baselineResult, setBaselineResult] = useState<any>(null);
+  const [currentScenario, setCurrentScenario] = useState<string | null>(null);
   const [schemeResult, setSchemeResult] = useState<SIHSchemeResult | null>(null);
   
   const currentQuestion = engine.getNextQuestion(inputs);
@@ -94,10 +97,16 @@ export default function RuralInterviewScreen() {
 
     const result = calculateFinancialAssessment(engineInputs, AARTHIKA_CALCULATION_POLICY);
     setAssessmentResult(result);
+    if (!stressScenario) {
+      setBaselineResult(result);
+      setCurrentScenario(null);
+    } else {
+      setCurrentScenario(stressScenario);
+    }
   };
 
-  const handleStressTrigger = (scenario: string) => {
-    runCalculation(1, scenario); 
+  const handleStressTrigger = (scenario: string | null) => {
+    runCalculation(1, scenario || undefined); 
   };
 
   const marginAmount = Number(inputs.available_margin_capital) || 0;
@@ -107,7 +116,7 @@ export default function RuralInterviewScreen() {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Aarthika Saathi</Text>
+          <Text style={styles.headerTitle}>AARTHIKA</Text>
           <TrustBadge source="DEMO_DATA" />
         </View>
 
@@ -144,23 +153,37 @@ export default function RuralInterviewScreen() {
               <SchemeRoutePath schemeResult={schemeResult} />
             )}
             
-            {!schemeResult?.isOutOfScope && assessmentResult.emi && schemeResult && (
-              <RepaymentTimeline 
-                loanAmount={assessmentResult.capitalized_principal || 0} 
-                moratoriumMonths={schemeResult.moratoriumMonths} 
-                emi={assessmentResult.emi} 
-                totalMonths={schemeResult.totalTenureMonths} 
-              />
-            )}
-
             {!schemeResult?.isOutOfScope && (
               <>
+                {assessmentResult.monthly_revenue && (
+                  <RealityCheckCard 
+                    monthlyRevenue={assessmentResult.monthly_revenue}
+                    totalExpenses={(assessmentResult.monthly_variable_cost || 0) + (assessmentResult.monthly_fixed_cost || 0)}
+                    businessCash={assessmentResult.business_cash_available_for_debt_service}
+                    breakEvenUnits={assessmentResult.break_even_units || 0}
+                  />
+                )}
+
+                {assessmentResult.emi && schemeResult && (
+                  <RepaymentTimeline 
+                    loanAmount={assessmentResult.capitalized_principal || 0} 
+                    moratoriumMonths={schemeResult.moratoriumMonths} 
+                    emi={assessmentResult.emi} 
+                    totalMonths={schemeResult.totalTenureMonths} 
+                  />
+                )}
+
                 <SafetySplitView 
                   businessSafety={assessmentResult.business_affordability_status} 
                   familySafety={assessmentResult.household_affordability_status} 
                 />
                 
-                <StressSimulatorGrid onStress={handleStressTrigger} />
+                <StressSimulatorGrid 
+                  onStress={handleStressTrigger} 
+                  baselineResult={baselineResult}
+                  stressResult={currentScenario ? assessmentResult : null}
+                  currentScenario={currentScenario}
+                />
                 
                 <ReadinessResult status={assessmentResult.overall_readiness} />
               </>
