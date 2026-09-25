@@ -34,6 +34,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import { GoNoGoGauge } from '../../components/GoNoGoGauge';
 import { RiskAnalysisDashboard } from '../components/RiskAnalysisDashboard';
+import RuralInterviewScreen from './rural-interview';
 
 // App logo and sector images
 const APP_LOGO = require('../../assets/images/logo.png');
@@ -337,6 +338,7 @@ export default function App() {
             {currentScreen === 'profile' && <ProfileScreen />}
             {currentScreen === 'business_details' && <BusinessDetailsScreen />}
             {currentScreen === 'explore_sectors' && <ExploreSectorsScreen />}
+            {currentScreen === 'sih_demo' && <RuralInterviewScreen />}
           </View>
 
           {/* Mobile Bottom Tab Navigation */}
@@ -523,6 +525,23 @@ function HomeScreen() {
           </View>
           <View style={styles.voiceHeroArrowWrap}>
             <Text style={styles.voiceHeroArrowText}>➔</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* SIH DEMO MODE BUTTON */}
+        <TouchableOpacity
+          style={[styles.voiceHeroCard, { backgroundColor: '#3f6653', marginTop: 15 }]}
+          onPress={() => navigateTo('sih_demo')}
+          activeOpacity={0.88}
+        >
+          <View style={[styles.voiceHeroMicWrap, { backgroundColor: '#beead1' }]}>
+            <Text style={{ fontSize: 24 }}>🚀</Text>
+          </View>
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={[styles.voiceHeroTitle, { color: '#ffffff' }]}>SIH Demo Mode</Text>
+            <Text style={[styles.voiceHeroSub, { color: '#e0e0e0' }]}>
+              New Rural-First Guided Interview Experience
+            </Text>
           </View>
         </TouchableOpacity>
       </View>
