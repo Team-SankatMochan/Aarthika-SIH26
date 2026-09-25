@@ -116,6 +116,55 @@ export const INTERVIEW_QUESTIONS: QuestionConfig[] = [
     allow_estimation: true,
     allow_unknown: true,
     confirmation_hi: "आपने {{value}} रुपये कहा. सही है?"
+  },
+  {
+    id: "monthly_rent",
+    canonical_field: "monthly_rent",
+    prompt_hi: "हर महीने का किराया कितना है?",
+    prompt_en: "What is the monthly rent?",
+    input_type: "NUMBER_WITH_UNIT",
+    required: true,
+    allow_estimation: false,
+    allow_unknown: true,
+    confirmation_hi: "आपने {{value}} रुपये कहा. सही है?"
+  },
+  {
+    id: "monthly_labour",
+    canonical_field: "monthly_labour_cost",
+    prompt_hi: "मजदूरी का हर महीने का खर्च कितना है?",
+    prompt_en: "What is the monthly labour cost?",
+    input_type: "NUMBER_WITH_UNIT",
+    required: true,
+    allow_estimation: false,
+    allow_unknown: true,
+    confirmation_hi: "आपने {{value}} रुपये कहा. सही है?"
+  },
+  {
+    id: "monthly_transport",
+    canonical_field: "monthly_transport_cost",
+    prompt_hi: "आने-जाने (ट्रांसपोर्ट) का महीने का खर्च कितना है?",
+    prompt_en: "What is the monthly transport cost?",
+    input_type: "NUMBER_WITH_UNIT",
+    required: true,
+    allow_estimation: false,
+    allow_unknown: true,
+    confirmation_hi: "आपने {{value}} रुपये कहा. सही है?"
+  },
+  {
+    id: "monthly_fixed_cost",
+    canonical_field: "monthly_other_fixed_cost",
+    prompt_hi: "हर महीने का पक्का खर्च (चारा, किराया आदि) कितना है?",
+    prompt_en: "What are your fixed monthly business expenses?",
+    input_type: "NUMBER_WITH_UNIT",
+    required: true,
+    allow_estimation: true,
+    allow_unknown: true,
+    confirmation_hi: "आपने {{value}} रुपये कहा. सही है?",
+    derivation_steps: [
+      { id: 'cows', prompt_hi: 'आपके पास कितनी गाएं/भैंसें होंगी?' },
+      { id: 'daily_fodder', prompt_hi: 'एक जानवर के चारे पर रोज़ का कितना खर्च आएगा?' }
+    ],
+    derivation_formula: (ans) => (ans.cows || 0) * (ans.daily_fodder || 0) * 30
   }
 ];
 

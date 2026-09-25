@@ -1,6 +1,11 @@
-export interface SIHSchemeResult { schemeName: string; isMicroFinance: boolean; projectCost: number; maxLoanComponent: number; interestRate: number; tenureMonths: number; moratoriumMonths: number; }
+export interface SIHSchemeResult { schemeName: string; isMicroFinance: boolean; projectCost: number; maxLoanComponent: number; raw90PercentLoan: number; schemeLoanCap: number; interestRate: number; tenureMonths: number; moratoriumMonths: number; isOutOfScope?: boolean; }
+
+export const AARTHIKA_CALCULATION_POLICY = { minimum_required_dscr: 1.2, maximum_household_debt_ratio: 0.5 };
 
 export function getSIHSchemeTerms(marginCapital: number): SIHSchemeResult {
+  if (!marginCapital || marginCapital <= 0) {
+    return { schemeName: "Invalid", isMicroFinance: false, projectCost: 0, maxLoanComponent: 0, raw90PercentLoan: 0, schemeLoanCap: 0, interestRate: 0, tenureMonths: 0, moratoriumMonths: 0, isOutOfScope: true };
+  }
   const projectCost = marginCapital / 0.10;
   let rawLoanComponent = projectCost * 0.90;
 
@@ -11,20 +16,38 @@ export function getSIHSchemeTerms(marginCapital: number): SIHSchemeResult {
       isMicroFinance: true,
       projectCost,
       maxLoanComponent: Math.min(rawLoanComponent, 125000),
+      raw90PercentLoan: rawLoanComponent,
+      schemeLoanCap: 125000,
       interestRate: 6.5,
       tenureMonths: 36,
       moratoriumMonths: 3
     };
-  } else {
+  } else if (projectCost <= 5000000) {
     // Term Loan
     return {
       schemeName: "Term Loan",
       isMicroFinance: false,
       projectCost,
       maxLoanComponent: Math.min(rawLoanComponent, 4500000), // max 45 lakh
+      raw90PercentLoan: rawLoanComponent,
+      schemeLoanCap: 4500000,
       interestRate: 8,
       tenureMonths: 84, // 7 years
       moratoriumMonths: 6
+    };
+  } else {
+    // Out of scope
+    return {
+      schemeName: "Out of Scope",
+      isMicroFinance: false,
+      projectCost,
+      maxLoanComponent: 0,
+      raw90PercentLoan: 0,
+      schemeLoanCap: 0,
+      interestRate: 0,
+      tenureMonths: 0,
+      moratoriumMonths: 0,
+      isOutOfScope: true
     };
   }
 }

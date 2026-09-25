@@ -13,13 +13,13 @@ import { SafetySplitView } from '../components/rural/SafetySplitView';
 import { StressSimulatorGrid } from '../components/rural/StressSimulatorGrid';
 import { ReadinessResult } from '../components/rural/ReadinessResult';
 import { calculateFinancialAssessment } from '../../engine/financeCalculator';
-import { getSIHSchemeTerms, SIHSchemeResult } from '../engine/SIHSchemeRules';
+import { getSIHSchemeTerms, SIHSchemeResult, AARTHIKA_CALCULATION_POLICY } from '../engine/SIHSchemeRules';
 
 const engine = new InterviewEngine();
-const DEMO_POLICY = { minimum_required_dscr: 1.2, maximum_household_debt_ratio: 0.5 };
 
 export default function RuralInterviewScreen() {
-  const inputs = useCanonicalInputs();
+  useCanonicalInputs(); // Just to trigger re-renders if needed
+  const inputs = globalInputStore.getConfirmedValues();
   const [showStructuring, setShowStructuring] = useState(false);
   const [assessmentResult, setAssessmentResult] = useState<any>(null);
   const [schemeResult, setSchemeResult] = useState<SIHSchemeResult | null>(null);
@@ -58,14 +58,25 @@ export default function RuralInterviewScreen() {
     };
 
     if (inputs.monthly_units_sold !== undefined) {
-      engineInputs.monthly_units_sold = Number(inputs.monthly_units_sold) * stressMultiplier;
+      let val = Number(inputs.monthly_units_sold);
+      if (stressScenario === 'DEMAND_DROP_20') val *= 0.80;
+      engineInputs.monthly_units_sold = val;
     }
     if (inputs.selling_price_per_unit !== undefined) {
       engineInputs.selling_price_per_unit = Number(inputs.selling_price_per_unit);
     }
     if (inputs.variable_cost_per_unit !== undefined) {
-      engineInputs.variable_cost_per_unit = Number(inputs.variable_cost_per_unit);
+      let val = Number(inputs.variable_cost_per_unit);
+      if (stressScenario === 'RAW_MATERIAL_UP_20') val *= 1.20;
+      engineInputs.variable_cost_per_unit = val;
     }
+    
+    // Fixed costs
+    if (inputs.monthly_rent !== undefined) engineInputs.monthly_rent = Number(inputs.monthly_rent);
+    if (inputs.monthly_labour_cost !== undefined) engineInputs.monthly_labour_cost = Number(inputs.monthly_labour_cost);
+    if (inputs.monthly_transport_cost !== undefined) engineInputs.monthly_transport_cost = Number(inputs.monthly_transport_cost);
+    if (inputs.monthly_other_fixed_cost !== undefined) engineInputs.monthly_other_fixed_cost = Number(inputs.monthly_other_fixed_cost);
+
     if (inputs.monthly_household_nonbusiness_income !== undefined) {
       engineInputs.monthly_household_nonbusiness_income = Number(inputs.monthly_household_nonbusiness_income);
     }
@@ -76,7 +87,7 @@ export default function RuralInterviewScreen() {
       engineInputs.existing_monthly_household_debt_payments = Number(inputs.existing_monthly_household_debt_payments);
     }
 
-    const result = calculateFinancialAssessment(engineInputs, DEMO_POLICY);
+    const result = calculateFinancialAssessment(engineInputs, AARTHIKA_CALCULATION_POLICY);
     setAssessmentResult(result);
   };
 
@@ -100,6 +111,8 @@ export default function RuralInterviewScreen() {
             marginCapital={marginAmount} 
             projectCost={currentScheme.projectCost}
             loanAmount={currentScheme.maxLoanComponent}
+            raw90PercentLoan={currentScheme.raw90PercentLoan}
+            schemeLoanCap={currentScheme.schemeLoanCap}
           />
         )}
 

@@ -5,9 +5,11 @@ interface Props {
   marginCapital: number;
   projectCost: number;
   loanAmount: number;
+  raw90PercentLoan?: number;
+  schemeLoanCap?: number;
 }
 
-export const FinancialStructuringAnimation: React.FC<Props> = ({ marginCapital, projectCost, loanAmount }) => {
+export const FinancialStructuringAnimation: React.FC<Props> = ({ marginCapital, projectCost, loanAmount, raw90PercentLoan, schemeLoanCap }) => {
   const [step, setStep] = useState(0);
 
   useEffect(() => {
@@ -17,6 +19,8 @@ export const FinancialStructuringAnimation: React.FC<Props> = ({ marginCapital, 
   }, []);
 
   const formatINR = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+
+  const isCapped = raw90PercentLoan && schemeLoanCap && raw90PercentLoan > schemeLoanCap;
 
   return (
     <View style={styles.container}>
@@ -46,11 +50,24 @@ export const FinancialStructuringAnimation: React.FC<Props> = ({ marginCapital, 
       {step >= 2 && (
         <>
           <View style={[styles.row, { marginTop: 20 }]}>
-            <Text style={styles.label}>Potential Loan (90%)</Text>
-            <Text style={[styles.value, { color: '#3f6653' }]}>{formatINR(loanAmount)}</Text>
+            <Text style={styles.label}>90% loan component:</Text>
+            <Text style={[styles.value, { color: '#666' }]}>{formatINR(raw90PercentLoan || (projectCost * 0.9))}</Text>
           </View>
-          <View style={[styles.bar, { width: '100%', backgroundColor: '#e9ecef' }]}>
-            <View style={[styles.bar, { width: '90%', backgroundColor: '#3f6653', position: 'absolute', right: 0 }]} />
+          
+          {isCapped && (
+            <View style={[styles.row, { marginTop: 5 }]}>
+              <Text style={styles.label}>Scheme maximum:</Text>
+              <Text style={[styles.value, { color: '#ba1a1a' }]}>{formatINR(schemeLoanCap)}</Text>
+            </View>
+          )}
+
+          <View style={[styles.row, { marginTop: 5, borderTopWidth: 1, borderColor: '#eee', paddingTop: 10 }]}>
+            <Text style={[styles.label, { fontWeight: 'bold' }]}>Maximum permitted loan:</Text>
+            <Text style={[styles.value, { color: '#3f6653', fontSize: 20 }]}>{formatINR(loanAmount)}</Text>
+          </View>
+          
+          <View style={[styles.bar, { width: '100%', backgroundColor: '#e9ecef', marginTop: 10 }]}>
+            <View style={[styles.bar, { width: isCapped ? '80%' : '90%', backgroundColor: '#3f6653', position: 'absolute', right: 0 }]} />
           </View>
         </>
       )}

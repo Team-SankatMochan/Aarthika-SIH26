@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, Platform } from 'react-native';
-import { QuestionConfig, DerivationStep } from '../../engine/InterviewEngine';
+import { QuestionConfig } from '../../engine/InterviewEngine';
 import { sttService } from '../../services/stt';
+import { parseSpokenNumber } from '../../services/numberParser';
 
 interface Props {
   question: QuestionConfig;
@@ -12,7 +13,9 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
   const [transcript, setTranscript] = useState('');
   const [inputValue, setInputValue] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [isDemoVoice, setIsDemoVoice] = useState(false);
+  const [parseError, setParseError] = useState('');
+
+  const isNumeric = question.input_type !== 'TEXT';
 
   // Derivation state
   const [inDerivationMode, setInDerivationMode] = useState(false);
@@ -27,17 +30,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
       return;
     }
 
-    if (Platform.OS !== 'web') {
-      setIsDemoVoice(true);
-      setIsListening(true);
-      setTimeout(() => {
-        const mockTranscript = question.id === 'margin_capital' ? 'Mahine ka lagbhag chaar hazaar hai' : '200';
-        onResultText(mockTranscript);
-        setIsListening(false);
-      }, 2000);
-      return;
-    }
-
+    setParseError('');
     sttService.startListening({
       lang: 'hi',
       onStart: () => setIsListening(true),
@@ -52,8 +45,17 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
     setInputValue('');
     startListeningBase((text) => {
       setTranscript(text);
-      const match = text.match(/\d+/);
-      if (match) setInputValue(match[0]);
+      if (isNumeric) {
+        const parsed = parseSpokenNumber(text);
+        if (parsed.success) {
+          setInputValue(parsed.value.toString());
+          setParseError('');
+        } else {
+          setParseError('मैं रकम समझ नहीं पाया। कृपया दोबारा बोलें या लिखें।');
+        }
+      } else {
+        setInputValue(text);
+      }
     });
   };
 
@@ -61,12 +63,11 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
     setTranscript('');
     startListeningBase((text) => {
       setTranscript(text);
-      const match = text.match(/\d+/);
-      if (match) {
-        const val = Number(match[0]);
+      const parsed = parseSpokenNumber(text);
+      if (parsed.success) {
+        const val = parsed.value;
         setDerivationAnswers(prev => {
           const next = { ...prev, [stepId]: val };
-          // If all steps are answered, compute
           if (question.derivation_steps && Object.keys(next).length === question.derivation_steps.length) {
             const calculated = question.derivation_formula ? question.derivation_formula(next) : val;
             setDerivedValue(calculated);
@@ -77,6 +78,14 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
         });
       }
     });
+  };
+
+  const confirmValue = () => {
+    if (isNumeric) {
+      onConfirm(Number(inputValue), 'USER_PROVIDED');
+    } else {
+      onConfirm(inputValue, 'USER_PROVIDED');
+    }
   };
 
   if (inDerivationMode && question.derivation_steps) {
@@ -122,7 +131,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
 
   return (
     <View style={styles.card}>
-      {isDemoVoice && <Text style={styles.demoBadge}>DEMO VOICE INPUT</Text>}
+      {Platform.OS !== 'web' && <Text style={styles.demoBadge}>DEMO VOICE INPUT</Text>}
       <Text style={styles.prompt}>{question.prompt_hi}</Text>
       <Text style={styles.subPrompt}>{question.prompt_en}</Text>
 
@@ -133,17 +142,22 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
           onChangeText={(val) => {
             setInputValue(val);
             setTranscript('Manual Edit');
+            setParseError('');
           }}
-          placeholder="0"
-          keyboardType="numeric"
+          placeholder={isNumeric ? "0" : "लिखें..."}
+          keyboardType={isNumeric ? "numeric" : "default"}
         />
         <TouchableOpacity style={[styles.micBtn, isListening && styles.micActive]} onPress={handleMicPress}>
           <Text style={styles.micIcon}>🎙️</Text>
         </TouchableOpacity>
       </View>
 
-      {transcript ? (
+      {transcript && !parseError ? (
         <Text style={styles.transcriptText}>सुना गया: &quot;{transcript}&quot;</Text>
+      ) : null}
+      
+      {parseError ? (
+        <Text style={[styles.transcriptText, { color: 'red' }]}>{parseError}</Text>
       ) : null}
 
       {inputValue ? (
@@ -151,7 +165,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
           <Text style={styles.confirmText}>
             {question.confirmation_hi.replace('{{value}}', inputValue)}
           </Text>
-          <TouchableOpacity style={styles.confirmBtn} onPress={() => onConfirm(Number(inputValue), 'USER_PROVIDED')}>
+          <TouchableOpacity style={styles.confirmBtn} onPress={confirmValue}>
             <Text style={styles.btnText}>✓ सही है</Text>
           </TouchableOpacity>
         </View>

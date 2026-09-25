@@ -18,6 +18,9 @@ export function formatINR(n: number): string {
 }
 
 export function calculateFinancialAssessment(inputs: any, policy: any): any {
+  if (!policy || !policy.minimum_required_dscr) throw new Error("CRITICAL: minimum_required_dscr missing from policy");
+  if (!policy.maximum_household_debt_ratio) throw new Error("CRITICAL: maximum_household_debt_ratio missing from policy");
+  
   const result: any = {};
   
   const reqLoan = inputs.requested_loan_amount != null ? new Decimal(inputs.requested_loan_amount) : null;
@@ -31,11 +34,28 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
   const price = inputs.selling_price_per_unit != null ? new Decimal(inputs.selling_price_per_unit) : null;
   const varCost = inputs.variable_cost_per_unit != null ? new Decimal(inputs.variable_cost_per_unit) : null;
   
-  const labour = inputs.monthly_labour_cost != null ? new Decimal(inputs.monthly_labour_cost) : new Decimal(0);
-  const rent = inputs.monthly_rent != null ? new Decimal(inputs.monthly_rent) : new Decimal(0);
-  const transport = inputs.monthly_transport_cost != null ? new Decimal(inputs.monthly_transport_cost) : new Decimal(0);
-  const otherFixed = inputs.monthly_other_fixed_cost != null ? new Decimal(inputs.monthly_other_fixed_cost) : new Decimal(0);
+  const missingFields: string[] = [];
+  const checkMissing = (field: string) => {
+    if (inputs[field] == null && inputs.monthly_fixed_cost == null) {
+      missingFields.push(field);
+      return new Decimal(0);
+    }
+    return new Decimal(inputs[field] || 0);
+  };
+
+  const labour = checkMissing('monthly_labour_cost');
+  const rent = checkMissing('monthly_rent');
+  const transport = checkMissing('monthly_transport_cost');
+  const otherFixed = checkMissing('monthly_other_fixed_cost');
   
+  if (missingFields.length > 0 && inputs.monthly_fixed_cost == null) {
+    result.loan_structure_status = "INSUFFICIENT_DATA";
+    result.business_affordability_status = "INSUFFICIENT_DATA";
+    result.overall_readiness = "INCOMPLETE";
+    result.missing_fields = missingFields;
+    return result;
+  }
+
   const fixedCost = inputs.monthly_fixed_cost != null ? new Decimal(inputs.monthly_fixed_cost) : labour.add(rent).add(transport).add(otherFixed);
   result.monthly_fixed_cost = Number(roundCurrency(fixedCost)!.toFixed(2));
   
@@ -124,8 +144,6 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
     result.business_dscr = Number(roundCurrency(bizDscr)!.toFixed(2));
   }
 
-  if (!policy.minimum_required_dscr) throw new Error("CRITICAL: minimum_required_dscr missing from policy");
-  if (!policy.maximum_household_debt_ratio) throw new Error("CRITICAL: maximum_household_debt_ratio missing from policy");
   
   const minDscr = new Decimal(policy.minimum_required_dscr);
   const maxHhDebt = new Decimal(policy.maximum_household_debt_ratio);
@@ -160,19 +178,21 @@ export function calculateFinancialAssessment(inputs: any, policy: any): any {
     result.missing_fields = missing;
   }
   
-  if (!("monthly_household_nonbusiness_income" in inputs) || inputs.monthly_household_nonbusiness_income === null) {
+  let hhPostRatio = null;
+  if (!("monthly_household_nonbusiness_income" in inputs) || inputs.monthly_household_nonbusiness_income === null ||
+      !("monthly_household_essential_expenses" in inputs) || inputs.monthly_household_essential_expenses === null ||
+      !("existing_monthly_household_debt_payments" in inputs) || inputs.existing_monthly_household_debt_payments === null) {
     result.household_affordability_status = "INSUFFICIENT_DATA";
     result.overall_readiness = "INCOMPLETE";
     if (!result.missing_fields) result.missing_fields = [];
-    result.missing_fields.push("monthly_household_nonbusiness_income");
-  }
-  
-  const hhIncomeRaw = inputs.monthly_household_nonbusiness_income;
-  let hhPostRatio = null;
-  if (hhIncomeRaw != null && hhIncomeRaw !== "null") {
+    if (!("monthly_household_nonbusiness_income" in inputs) || inputs.monthly_household_nonbusiness_income === null) result.missing_fields.push("monthly_household_nonbusiness_income");
+    if (!("monthly_household_essential_expenses" in inputs) || inputs.monthly_household_essential_expenses === null) result.missing_fields.push("monthly_household_essential_expenses");
+    if (!("existing_monthly_household_debt_payments" in inputs) || inputs.existing_monthly_household_debt_payments === null) result.missing_fields.push("existing_monthly_household_debt_payments");
+  } else {
+    const hhIncomeRaw = inputs.monthly_household_nonbusiness_income;
     const hhInc = new Decimal(hhIncomeRaw);
-    const hhExp = new Decimal(inputs.monthly_household_essential_expenses || 0);
-    const hhDebt = new Decimal(inputs.existing_monthly_household_debt_payments || 0);
+    const hhExp = new Decimal(inputs.monthly_household_essential_expenses);
+    const hhDebt = new Decimal(inputs.existing_monthly_household_debt_payments);
     
     const hhFree = hhInc.sub(hhExp).sub(hhDebt);
     result.household_free_cash = Number(roundCurrency(hhFree)!.toFixed(2));
