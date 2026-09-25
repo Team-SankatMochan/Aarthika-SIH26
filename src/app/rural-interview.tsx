@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView } from 'react-native';
-import { globalInputStore, useCanonicalInputs } from '../engine/CanonicalInputStore';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { globalInputStore, useCanonicalInputs, ProvenanceSource } from '../engine/CanonicalInputStore';
 import { InterviewEngine } from '../engine/InterviewEngine';
 import { VoiceQuestionCard } from '../components/rural/VoiceQuestionCard';
 import { FinancialStructuringAnimation } from '../components/rural/FinancialStructuringAnimation';
@@ -14,20 +15,23 @@ import { ReadinessResult } from '../components/rural/ReadinessResult';
 import { calculateFinancialAssessment } from '../../engine/financeCalculator';
 
 const engine = new InterviewEngine();
+const DEMO_POLICY = { minimum_required_dscr: 1.2, maximum_household_debt_ratio: 0.5 };
 
 export default function RuralInterviewScreen() {
   const inputs = useCanonicalInputs();
   const [showStructuring, setShowStructuring] = useState(false);
-  const [isCalculated, setIsCalculated] = useState(false);
+  const [assessmentResult, setAssessmentResult] = useState<any>(null);
+  const [schemeResult, setSchemeResult] = useState<{ isMicroFinance: boolean }>({ isMicroFinance: false });
   
   const currentQuestion = engine.getNextQuestion(inputs);
 
-  const handleConfirm = (value: any) => {
+  const handleConfirm = (value: any, source: string, derivation?: any) => {
     globalInputStore.set({
       field: currentQuestion!.canonical_field,
       value: value,
-      source: 'USER_PROVIDED',
+      source: source as ProvenanceSource,
       confirmed: true,
+      derivation: derivation,
       timestamp: Date.now()
     });
 
@@ -36,14 +40,33 @@ export default function RuralInterviewScreen() {
     }
   };
 
-  const handleHelpEstimate = () => {
-    // Basic stub for estimation flow
-    alert('Assisted estimation will appear here.');
+  const runCalculation = (stressMultiplier = 1) => {
+    // Rely strictly on engine logic, not component rules
+    const margin = Number(inputs.available_margin_capital) || 0;
+    const projectCost = margin / 0.10; // SIH Challenge 10% logic
+    
+    // Engine Payload
+    const engineInputs = {
+      requested_loan_amount: projectCost * 0.9,
+      annual_interest_rate_percent: 12,
+      repayment_tenure_months: 36,
+      moratorium_months: 3,
+      monthly_units_sold: (Number(inputs.monthly_units_sold) || 0) * stressMultiplier,
+      selling_price_per_unit: Number(inputs.selling_price_per_unit) || 0,
+      variable_cost_per_unit: Number(inputs.variable_cost_per_unit) || 0,
+      monthly_fixed_cost: 0,
+      monthly_household_nonbusiness_income: 10000,
+      monthly_household_essential_expenses: 5000,
+      existing_monthly_household_debt_payments: 0
+    };
+
+    const result = calculateFinancialAssessment(engineInputs, DEMO_POLICY);
+    setAssessmentResult(result);
+    setSchemeResult({ isMicroFinance: projectCost <= 140000 });
   };
 
-  const runCalculation = () => {
-    // In a real flow, we'd pass all inputs to calculateFinancialAssessment
-    setIsCalculated(true);
+  const handleStressTrigger = () => {
+    runCalculation(0.8); // 20% drop in sales
   };
 
   return (
@@ -58,18 +81,17 @@ export default function RuralInterviewScreen() {
           <FinancialStructuringAnimation marginCapital={Number(inputs.available_margin_capital)} />
         )}
 
-        {!isCalculated ? (
+        {!assessmentResult ? (
           currentQuestion ? (
             <VoiceQuestionCard 
               key={currentQuestion.id}
               question={currentQuestion}
               onConfirm={handleConfirm}
-              onHelpEstimate={handleHelpEstimate}
             />
           ) : (
             <View style={styles.doneCard}>
               <Text style={styles.doneText}>जानकारी पूरी हुई!</Text>
-              <TouchableOpacity style={styles.doneBtn} onPress={runCalculation}>
+              <TouchableOpacity style={styles.doneBtn} onPress={() => runCalculation(1)}>
                 <Text style={styles.doneBtnText}>परिणाम देखें</Text>
               </TouchableOpacity>
             </View>
@@ -77,11 +99,26 @@ export default function RuralInterviewScreen() {
         ) : (
           <View style={styles.resultsContainer}>
             <HyperLocalMarketRadar />
-            <SchemeRoutePath projectCost={Number(inputs.available_margin_capital) / 0.1} />
-            <RepaymentTimeline loanAmount={Number(inputs.available_margin_capital) * 9} moratoriumMonths={3} emi={4500} totalMonths={36} />
-            <SafetySplitView businessSafety="SAFE" familySafety="SAFE" />
-            <StressSimulatorGrid />
-            <ReadinessResult status="READY_FOR_FINANCE_REVIEW" />
+            
+            <SchemeRoutePath isMicroFinance={schemeResult.isMicroFinance} />
+            
+            {assessmentResult.emi && (
+              <RepaymentTimeline 
+                loanAmount={assessmentResult.capitalized_principal || 0} 
+                moratoriumMonths={3} 
+                emi={assessmentResult.emi} 
+                totalMonths={36} 
+              />
+            )}
+
+            <SafetySplitView 
+              businessSafety={assessmentResult.business_affordability_status} 
+              familySafety={assessmentResult.household_affordability_status} 
+            />
+            
+            <StressSimulatorGrid onStress={handleStressTrigger} />
+            
+            <ReadinessResult status={assessmentResult.overall_readiness} />
           </View>
         )}
       </ScrollView>

@@ -2,12 +2,11 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 interface Props {
-  projectCost: number;
+  isMicroFinance: boolean;
 }
 
-export const SchemeRoutePath: React.FC<Props> = ({ projectCost }) => {
-  // Deterministic Routing matching Phase 2 P1
-  const isMicroFinance = projectCost <= 140000;
+export const SchemeRoutePath: React.FC<Props> = ({ isMicroFinance }) => {
+
   
   return (
     <View style={styles.card}>

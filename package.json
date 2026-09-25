@@ -43,6 +43,7 @@
     "@types/node": "^26.6.2",
     "@types/react": "~19.2.2",
     "better-sqlite3": "^13.0.3",
+    "cross-env": "^10.1.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
     "jest": "^30.5.2",

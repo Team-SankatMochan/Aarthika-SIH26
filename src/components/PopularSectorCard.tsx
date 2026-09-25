@@ -42,7 +42,7 @@ export const PopularSectorCard: React.FC<PopularSectorCardProps> = ({
   snapInterval,
 }) => {
   const [isActive, setIsActive] = useState(false);
-  const touchScaleAnim = useRef(new Animated.Value(1)).current;
+  const [touchScaleAnim] = useState(() => new Animated.Value(1));
 
   // Touch press animation
   const handlePressIn = () => {

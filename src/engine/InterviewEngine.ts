@@ -1,3 +1,8 @@
+export interface DerivationStep {
+  id: string;
+  prompt_hi: string;
+}
+
 export interface QuestionConfig {
   id: string;
   canonical_field: string;
@@ -8,6 +13,8 @@ export interface QuestionConfig {
   allow_estimation: boolean;
   allow_unknown: boolean;
   confirmation_hi: string;
+  derivation_steps?: DerivationStep[];
+  derivation_formula?: (answers: Record<string, number>) => number;
 }
 
 export const INTERVIEW_QUESTIONS: QuestionConfig[] = [
@@ -23,6 +30,22 @@ export const INTERVIEW_QUESTIONS: QuestionConfig[] = [
     confirmation_hi: "आपने {{value}} रुपये कहा. सही है?"
   },
   {
+    id: "variable_cost",
+    canonical_field: "variable_cost_per_unit",
+    prompt_hi: "महीने का चारे का खर्च कितना है?", // Generalized for dairy demo
+    prompt_en: "What is your monthly fodder cost?",
+    input_type: "NUMBER_WITH_UNIT",
+    required: true,
+    allow_estimation: true,
+    allow_unknown: true,
+    confirmation_hi: "आपने {{value}} रुपये कहा. सही है?",
+    derivation_steps: [
+      { id: "cows", prompt_hi: "कितनी गाय हैं?" },
+      { id: "daily_cost_per_cow", prompt_hi: "एक गाय के चारे पर रोज कितना खर्च?" }
+    ],
+    derivation_formula: (ans) => (ans.cows || 0) * (ans.daily_cost_per_cow || 0) * 30
+  },
+  {
     id: "monthly_units_sold",
     canonical_field: "monthly_units_sold",
     prompt_hi: "एक महीने में लगभग कितना माल बेच पाएंगे?",
@@ -32,17 +55,6 @@ export const INTERVIEW_QUESTIONS: QuestionConfig[] = [
     allow_estimation: true,
     allow_unknown: true,
     confirmation_hi: "आपने {{value}} यूनिट प्रति महीना कहा. सही है?"
-  },
-  {
-    id: "variable_cost",
-    canonical_field: "variable_cost_per_unit",
-    prompt_hi: "एक यूनिट बनाने या खरीदने में कितना खर्च आता है?",
-    prompt_en: "What is the variable cost per unit?",
-    input_type: "NUMBER_WITH_UNIT",
-    required: true,
-    allow_estimation: true,
-    allow_unknown: true,
-    confirmation_hi: "आपने {{value}} रुपये कहा. सही है?"
   },
   {
     id: "selling_price",

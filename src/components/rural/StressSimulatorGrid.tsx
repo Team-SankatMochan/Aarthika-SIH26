@@ -1,14 +1,18 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
-export const StressSimulatorGrid: React.FC = () => {
+interface Props {
+  onStress?: () => void;
+}
+
+export const StressSimulatorGrid: React.FC<Props> = ({ onStress }) => {
   return (
     <View style={styles.card}>
       <Text style={styles.title}>अगर ऐसा हो जाए तो?</Text>
       <Text style={styles.subtitle}>मुश्किल परिस्थितियों में अपने प्लान की जांच करें:</Text>
       
       <View style={styles.grid}>
-        <TouchableOpacity style={styles.btn}>
+        <TouchableOpacity style={styles.btn} onPress={onStress}>
           <Text style={styles.icon}>📉</Text>
           <Text style={styles.btnText}>बिक्री 20% कम हो जाए</Text>
         </TouchableOpacity>

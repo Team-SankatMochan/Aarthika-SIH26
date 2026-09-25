@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Modal,
   StyleSheet,
@@ -37,7 +37,7 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
   const [manualInput, setManualInput] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const [pulseAnim] = useState(() => new Animated.Value(1));
 
   // Pulse animation for listening state
   useEffect(() => {
@@ -61,24 +61,7 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
     }
   }, [listening]);
 
-  // Auto-start listening on modal open
-  useEffect(() => {
-    if (isOpen) {
-      setSpokenText('');
-      setParsedResult(null);
-      setManualInput('');
-      setErrorMsg(null);
-      startVoiceListening();
-    } else {
-      sttService.stopListening();
-      setListening(false);
-    }
-    return () => {
-      sttService.stopListening();
-    };
-  }, [isOpen, currentLang]);
-
-  const startVoiceListening = () => {
+  const startVoiceListening = useCallback(() => {
     setErrorMsg(null);
     setListening(true);
 
@@ -108,7 +91,26 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
         setListening(false);
       },
     });
-  };
+  }, [currentLang]);
+
+  // Auto-start listening on modal open
+  useEffect(() => {
+    if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSpokenText('');
+      setParsedResult(null);
+      setManualInput('');
+      setErrorMsg(null);
+      startVoiceListening();
+    } else {
+      sttService.stopListening();
+      setListening(false);
+    }
+    return () => {
+      sttService.stopListening();
+    };
+  }, [isOpen, currentLang]);
+
 
   const handleApply = () => {
     if (parsedResult && parsedResult.success && parsedResult.value > 0) {
@@ -192,7 +194,7 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
           {spokenText.length > 0 && (
             <View style={styles.resultBox}>
               <Text style={styles.resultLabel}>{t('spoken_text') || 'Spoken Speech:'}</Text>
-              <Text style={styles.spokenTextDisplay}>"{spokenText}"</Text>
+              <Text style={styles.spokenTextDisplay}>&quot;{spokenText}&quot;</Text>
 
               {parsedResult && parsedResult.success ? (
                 <View style={styles.successValueBadge}>

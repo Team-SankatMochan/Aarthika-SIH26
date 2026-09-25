@@ -192,6 +192,37 @@ def calculate_financial_assessment(
             result["break_even_units"] = None
             result["break_even_status"] = "STRUCTURALLY_UNVIABLE"
 
+    # ── Scenario handling ──
+    scenario = inputs.get("scenario")
+    if scenario and units_sold is not None and price is not None and var_cost is not None and fixed_cost is not None:
+        sim_units = Decimal(str(units_sold))
+        sim_price = Decimal(str(price))
+        sim_var = Decimal(str(var_cost))
+        sim_fixed = fixed_cost
+        
+        if scenario == "DEMAND_DROP_20":
+            sim_units = sim_units * Decimal("0.8")
+            result["simulated_monthly_units_sold"] = int(sim_units.to_integral_value(rounding=ROUND_HALF_UP))
+        elif scenario == "RAW_MATERIAL_UP_20":
+            sim_var = sim_var * Decimal("1.2")
+            result["simulated_monthly_units_sold"] = int(sim_units.to_integral_value(rounding=ROUND_HALF_UP))
+            result["simulated_variable_cost_per_unit"] = round_currency(sim_var)
+        elif scenario == "TRANSPORT_COST_SPIKE_50":
+            sim_trans = Decimal(str(inputs.get("monthly_transport_cost", 0) or 0)) * Decimal("1.5")
+            old_trans = Decimal(str(inputs.get("monthly_transport_cost", 0) or 0))
+            sim_fixed = sim_fixed - old_trans + sim_trans
+            result["simulated_monthly_units_sold"] = int(sim_units.to_integral_value(rounding=ROUND_HALF_UP))
+            result["simulated_monthly_transport_cost"] = round_currency(sim_trans)
+
+        sim_rev = sim_units * sim_price
+        sim_vc = sim_units * sim_var
+        sim_surplus = sim_rev - (sim_vc + sim_fixed)
+        
+        result["simulated_monthly_revenue"] = round_currency(sim_rev)
+        result["simulated_monthly_variable_cost"] = round_currency(sim_vc)
+        result["simulated_monthly_fixed_cost"] = round_currency(sim_fixed)
+        result["simulated_monthly_operating_surplus"] = round_currency(sim_surplus)
+
     # ── Business CFADS ──
     cfads = None
     if units_sold is not None and price is not None and var_cost is not None:

@@ -10,7 +10,7 @@ POLICY_FILE = SPEC_DIR / "calculation-policy.json"
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from app.services.finance_calculator import calculate_golden_test
+from app.services.finance_calculator import calculate_financial_assessment
 
 def load_tests():
     with open(GOLDEN_TESTS_FILE, "r") as f:
@@ -30,7 +30,7 @@ def run():
         inputs = test_case["inputs"]
         expected = test_case["expected"]
         
-        result = calculate_golden_test(inputs, policy)
+        result = calculate_financial_assessment(inputs, policy, allow_stage_overrides=True)
         
         test_passed = True
         for key, expected_value in expected.items():
