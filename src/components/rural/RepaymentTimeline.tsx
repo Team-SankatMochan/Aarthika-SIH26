@@ -45,7 +45,7 @@ export const RepaymentTimeline: React.FC<Props> = ({ loanAmount, moratoriumMonth
           <View style={[styles.dot, { backgroundColor: '#3f6653' }]} />
           <View style={styles.content}>
             <Text style={styles.stepTitle}>किश्त (EMI) शुरू</Text>
-            <Text style={styles.stepDesc}>₹{emi.toLocaleString('en-IN')} हर महीने ({totalMonths} महीनों तक)</Text>
+            <Text style={styles.stepDesc}>₹{emi.toLocaleString('en-IN')} हर महीने ({totalMonths - moratoriumMonths} महीनों तक)</Text>
           </View>
         </View>
         

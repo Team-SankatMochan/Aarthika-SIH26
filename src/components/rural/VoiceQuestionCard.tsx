@@ -30,9 +30,20 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
       return;
     }
 
+    let fixture = "पचास हजार";
+    switch (question.canonical_field) {
+      case 'location': fixture = "रामपुर, मलिहाबाद, लखनऊ"; break;
+      case 'business_category': fixture = "डेयरी"; break;
+      case 'available_margin_capital': fixture = "एक लाख"; break;
+      case 'monthly_units_sold': fixture = "छह सौ"; break;
+      case 'selling_price_per_unit': fixture = "पचपन"; break;
+      default: fixture = isNumeric ? "दस हजार" : "टेस्ट"; break;
+    }
+
     setParseError('');
     sttService.startListening({
       lang: 'hi',
+      demoFixture: fixture,
       onStart: () => setIsListening(true),
       onResult: (text) => onResultText(text),
       onEnd: () => setIsListening(false),

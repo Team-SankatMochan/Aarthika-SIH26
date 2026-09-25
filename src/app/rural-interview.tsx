@@ -48,11 +48,16 @@ export default function RuralInterviewScreen() {
     const scheme = getSIHSchemeTerms(margin);
     setSchemeResult(scheme);
     
+    if (scheme.isOutOfScope) {
+      setAssessmentResult({ isOutOfScope: true });
+      return;
+    }
+
     // Engine Payload using ONLY confirmed inputs. Unconfirmed or missing remain undefined.
     const engineInputs: any = {
       requested_loan_amount: scheme.maxLoanComponent,
       annual_interest_rate_percent: scheme.interestRate,
-      repayment_tenure_months: scheme.tenureMonths,
+      repayment_tenure_months: scheme.activeRepaymentMonths,
       moratorium_months: scheme.moratoriumMonths,
       scenario: stressScenario
     };
@@ -136,26 +141,30 @@ export default function RuralInterviewScreen() {
             <HyperLocalMarketRadar location={inputs.location} />
             
             {schemeResult && (
-              <SchemeRoutePath isMicroFinance={schemeResult.isMicroFinance} />
+              <SchemeRoutePath schemeResult={schemeResult} />
             )}
             
-            {assessmentResult.emi && schemeResult && (
+            {!schemeResult?.isOutOfScope && assessmentResult.emi && schemeResult && (
               <RepaymentTimeline 
                 loanAmount={assessmentResult.capitalized_principal || 0} 
                 moratoriumMonths={schemeResult.moratoriumMonths} 
                 emi={assessmentResult.emi} 
-                totalMonths={schemeResult.tenureMonths} 
+                totalMonths={schemeResult.totalTenureMonths} 
               />
             )}
 
-            <SafetySplitView 
-              businessSafety={assessmentResult.business_affordability_status} 
-              familySafety={assessmentResult.household_affordability_status} 
-            />
-            
-            <StressSimulatorGrid onStress={handleStressTrigger} />
-            
-            <ReadinessResult status={assessmentResult.overall_readiness} />
+            {!schemeResult?.isOutOfScope && (
+              <>
+                <SafetySplitView 
+                  businessSafety={assessmentResult.business_affordability_status} 
+                  familySafety={assessmentResult.household_affordability_status} 
+                />
+                
+                <StressSimulatorGrid onStress={handleStressTrigger} />
+                
+                <ReadinessResult status={assessmentResult.overall_readiness} />
+              </>
+            )}
           </View>
         )}
       </ScrollView>

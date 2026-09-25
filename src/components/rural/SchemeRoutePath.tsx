@@ -1,13 +1,24 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
+import { SIHSchemeResult } from '../../engine/SIHSchemeRules';
+
 interface Props {
-  isMicroFinance: boolean;
+  schemeResult: SIHSchemeResult;
 }
 
-export const SchemeRoutePath: React.FC<Props> = ({ isMicroFinance }) => {
-
+export const SchemeRoutePath: React.FC<Props> = ({ schemeResult }) => {
+  const { isMicroFinance, isOutOfScope } = schemeResult;
   
+  if (isOutOfScope) {
+    return (
+      <View style={[styles.card, { borderColor: '#ba1a1a', borderWidth: 2 }]}>
+         <Text style={[styles.title, { color: '#ba1a1a' }]}>योजना से बाहर (Out of Scope)</Text>
+         <Text style={styles.subtitle}>यह project cost इस SIH scheme range से बाहर है.</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.card}>
       <Text style={styles.title}>सरकारी योजना मिलान</Text>

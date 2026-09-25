@@ -20,6 +20,7 @@ export const STT_LANG_MAP: Record<string, string> = {
 
 export interface STTOptions {
   lang?: string;
+  demoFixture?: string;
   continuous?: boolean;
   interimResults?: boolean;
   onResult: (transcript: string, isFinal: boolean) => void;
@@ -126,7 +127,8 @@ class SpeechToTextService {
     this.recognition = setTimeout(() => {
       if (this.isListening) {
         // Return a demo string that the parser can handle
-        options.onResult("पचास हजार", true);
+        const text = options.demoFixture || "पचास हजार";
+        options.onResult(text, true);
         this.stopListening();
       }
     }, 2500);

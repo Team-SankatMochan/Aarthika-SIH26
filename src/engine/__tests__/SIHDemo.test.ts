@@ -25,14 +25,7 @@ describe('SIH Demo Closure Tests', () => {
     });
   });
 
-  describe('Assisted Estimation Derivation', () => {
-    it('calculates derived value correctly', () => {
-      // Mocking the formula from InterviewEngine
-      const derivation_formula = (ans: Record<string, number>) => (ans.cows || 0) * (ans.daily_fodder || 0) * 30;
-      const ans = { cows: 4, daily_fodder: 70 };
-      expect(derivation_formula(ans)).toBe(8400);
-    });
-  });
+
 
   describe('Missing vs Zero Fixed Costs', () => {
     it('treats missing fixed costs as INSUFFICIENT_DATA', () => {
@@ -86,7 +79,7 @@ describe('SIH Demo Closure Tests', () => {
     });
   });
 
-  describe('SIH Scheme Boundaries', () => {
+  describe('SIH Scheme Boundaries and Tenures', () => {
     it('Micro Finance Boundary', () => {
       // project cost = 1.40L requires margin 14,000
       const scheme = getSIHSchemeTerms(14000);
@@ -94,6 +87,8 @@ describe('SIH Demo Closure Tests', () => {
       expect(scheme.projectCost).toBe(140000);
       expect(scheme.raw90PercentLoan).toBe(126000);
       expect(scheme.maxLoanComponent).toBe(125000); // Capped at 1.25L
+      expect(scheme.totalTenureMonths).toBe(36);
+      expect(scheme.activeRepaymentMonths).toBe(33);
     });
 
     it('Term Loan Boundary', () => {
@@ -102,14 +97,45 @@ describe('SIH Demo Closure Tests', () => {
       expect(scheme.isMicroFinance).toBe(false);
       expect(scheme.schemeName).toBe('Term Loan');
       expect(scheme.projectCost).toBe(141000);
+      expect(scheme.totalTenureMonths).toBe(84);
+      expect(scheme.activeRepaymentMonths).toBe(78);
     });
 
     it('Out of Scope (> 50L)', () => {
       // project cost = 51L requires margin 5,10,000
       const scheme = getSIHSchemeTerms(510000);
       expect(scheme.isOutOfScope).toBe(true);
+      expect(scheme.schemeName).not.toBe('Term Loan');
       expect(scheme.schemeName).toBe('Out of Scope');
       expect(scheme.maxLoanComponent).toBe(0);
+    });
+  });
+
+  describe('Policy Configuration', () => {
+    it('canonical policy loaded from the canonical source', () => {
+      expect(AARTHIKA_CALCULATION_POLICY.minimum_required_dscr).toBe(1.25);
+      expect(AARTHIKA_CALCULATION_POLICY.maximum_household_debt_ratio).toBe(0.50);
+    });
+  });
+
+  describe('Demo Voice Fixtures', () => {
+    it('demo TEXT voice fixture remains string', () => {
+      // In the app, location is a TEXT field. Text isn't parsed through numberParser.
+      const fixture = "रामपुर, मलिहाबाद, लखनऊ";
+      expect(typeof fixture).toBe('string');
+      // If we passed it through numberParser by mistake, it would fail
+      const parsed = parseSpokenNumber(fixture);
+      expect(parsed.success).toBe(false);
+    });
+
+    it('demo numeric voice fixture passes number parser', () => {
+      const marginFixture = "एक लाख";
+      const unitsFixture = "छह सौ";
+      const priceFixture = "पचपन";
+      
+      expect(parseSpokenNumber(marginFixture).value).toBe(100000);
+      expect(parseSpokenNumber(unitsFixture).value).toBe(600);
+      expect(parseSpokenNumber(priceFixture).value).toBe(55);
     });
   });
 });

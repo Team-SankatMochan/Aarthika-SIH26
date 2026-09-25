@@ -1,10 +1,12 @@
-export interface SIHSchemeResult { schemeName: string; isMicroFinance: boolean; projectCost: number; maxLoanComponent: number; raw90PercentLoan: number; schemeLoanCap: number; interestRate: number; tenureMonths: number; moratoriumMonths: number; isOutOfScope?: boolean; }
+import policyData from '../../finance-spec/calculation-policy.json';
 
-export const AARTHIKA_CALCULATION_POLICY = { minimum_required_dscr: 1.2, maximum_household_debt_ratio: 0.5 };
+export interface SIHSchemeResult { schemeName: string; isMicroFinance: boolean; projectCost: number; maxLoanComponent: number; raw90PercentLoan: number; schemeLoanCap: number; interestRate: number; totalTenureMonths: number; activeRepaymentMonths: number; moratoriumMonths: number; isOutOfScope?: boolean; }
+
+export const AARTHIKA_CALCULATION_POLICY = policyData;
 
 export function getSIHSchemeTerms(marginCapital: number): SIHSchemeResult {
   if (!marginCapital || marginCapital <= 0) {
-    return { schemeName: "Invalid", isMicroFinance: false, projectCost: 0, maxLoanComponent: 0, raw90PercentLoan: 0, schemeLoanCap: 0, interestRate: 0, tenureMonths: 0, moratoriumMonths: 0, isOutOfScope: true };
+    return { schemeName: "Invalid", isMicroFinance: false, projectCost: 0, maxLoanComponent: 0, raw90PercentLoan: 0, schemeLoanCap: 0, interestRate: 0, totalTenureMonths: 0, activeRepaymentMonths: 0, moratoriumMonths: 0, isOutOfScope: true };
   }
   const projectCost = marginCapital / 0.10;
   let rawLoanComponent = projectCost * 0.90;
@@ -19,7 +21,8 @@ export function getSIHSchemeTerms(marginCapital: number): SIHSchemeResult {
       raw90PercentLoan: rawLoanComponent,
       schemeLoanCap: 125000,
       interestRate: 6.5,
-      tenureMonths: 36,
+      totalTenureMonths: 36,
+      activeRepaymentMonths: 33,
       moratoriumMonths: 3
     };
   } else if (projectCost <= 5000000) {
@@ -32,7 +35,8 @@ export function getSIHSchemeTerms(marginCapital: number): SIHSchemeResult {
       raw90PercentLoan: rawLoanComponent,
       schemeLoanCap: 4500000,
       interestRate: 8,
-      tenureMonths: 84, // 7 years
+      totalTenureMonths: 84, // 7 years
+      activeRepaymentMonths: 78,
       moratoriumMonths: 6
     };
   } else {
@@ -45,7 +49,8 @@ export function getSIHSchemeTerms(marginCapital: number): SIHSchemeResult {
       raw90PercentLoan: 0,
       schemeLoanCap: 0,
       interestRate: 0,
-      tenureMonths: 0,
+      totalTenureMonths: 0,
+      activeRepaymentMonths: 0,
       moratoriumMonths: 0,
       isOutOfScope: true
     };
