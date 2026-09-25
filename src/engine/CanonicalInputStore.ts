@@ -33,6 +33,16 @@ class CanonicalInputStore {
     return record;
   }
 
+  getConfirmedValues(): Record<string, any> {
+    const record: Record<string, any> = {};
+    for (const [key, val] of Array.from(this.store.entries())) {
+      if (val.confirmed === true) {
+        record[key] = val.value;
+      }
+    }
+    return record;
+  }
+
   subscribe(listener: () => void) {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
@@ -53,6 +63,18 @@ export function useCanonicalInputs() {
   useEffect(() => {
     return globalInputStore.subscribe(() => {
       setInputs(globalInputStore.getAllAsRecord());
+    });
+  }, []);
+
+  return inputs;
+}
+
+export function useConfirmedCanonicalInputs() {
+  const [inputs, setInputs] = useState(globalInputStore.getConfirmedValues());
+
+  useEffect(() => {
+    return globalInputStore.subscribe(() => {
+      setInputs(globalInputStore.getConfirmedValues());
     });
   }, []);
 

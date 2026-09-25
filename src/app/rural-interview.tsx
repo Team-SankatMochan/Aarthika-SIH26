@@ -13,6 +13,7 @@ import { SafetySplitView } from '../components/rural/SafetySplitView';
 import { StressSimulatorGrid } from '../components/rural/StressSimulatorGrid';
 import { ReadinessResult } from '../components/rural/ReadinessResult';
 import { calculateFinancialAssessment } from '../../engine/financeCalculator';
+import { getSIHSchemeTerms, SIHSchemeResult } from '../engine/SIHSchemeRules';
 
 const engine = new InterviewEngine();
 const DEMO_POLICY = { minimum_required_dscr: 1.2, maximum_household_debt_ratio: 0.5 };
@@ -21,15 +22,17 @@ export default function RuralInterviewScreen() {
   const inputs = useCanonicalInputs();
   const [showStructuring, setShowStructuring] = useState(false);
   const [assessmentResult, setAssessmentResult] = useState<any>(null);
-  const [schemeResult, setSchemeResult] = useState<{ isMicroFinance: boolean }>({ isMicroFinance: false });
+  const [schemeResult, setSchemeResult] = useState<SIHSchemeResult | null>(null);
   
   const currentQuestion = engine.getNextQuestion(inputs);
 
   const handleConfirm = (value: any, source: string, derivation?: any) => {
+    // If assisted estimate, use USER_CONFIRMED_ESTIMATE
+    const provenance = source === 'DERIVED_FROM_USER_INPUT' ? 'USER_CONFIRMED_ESTIMATE' : source;
     globalInputStore.set({
       field: currentQuestion!.canonical_field,
       value: value,
-      source: source as ProvenanceSource,
+      source: provenance as ProvenanceSource,
       confirmed: true,
       derivation: derivation,
       timestamp: Date.now()
@@ -40,34 +43,49 @@ export default function RuralInterviewScreen() {
     }
   };
 
-  const runCalculation = (stressMultiplier = 1) => {
-    // Rely strictly on engine logic, not component rules
+  const runCalculation = (stressMultiplier = 1, stressScenario?: string) => {
     const margin = Number(inputs.available_margin_capital) || 0;
-    const projectCost = margin / 0.10; // SIH Challenge 10% logic
+    const scheme = getSIHSchemeTerms(margin);
+    setSchemeResult(scheme);
     
-    // Engine Payload
-    const engineInputs = {
-      requested_loan_amount: projectCost * 0.9,
-      annual_interest_rate_percent: 12,
-      repayment_tenure_months: 36,
-      moratorium_months: 3,
-      monthly_units_sold: (Number(inputs.monthly_units_sold) || 0) * stressMultiplier,
-      selling_price_per_unit: Number(inputs.selling_price_per_unit) || 0,
-      variable_cost_per_unit: Number(inputs.variable_cost_per_unit) || 0,
-      monthly_fixed_cost: 0,
-      monthly_household_nonbusiness_income: 10000,
-      monthly_household_essential_expenses: 5000,
-      existing_monthly_household_debt_payments: 0
+    // Engine Payload using ONLY confirmed inputs. Unconfirmed or missing remain undefined.
+    const engineInputs: any = {
+      requested_loan_amount: scheme.maxLoanComponent,
+      annual_interest_rate_percent: scheme.interestRate,
+      repayment_tenure_months: scheme.tenureMonths,
+      moratorium_months: scheme.moratoriumMonths,
+      scenario: stressScenario
     };
+
+    if (inputs.monthly_units_sold !== undefined) {
+      engineInputs.monthly_units_sold = Number(inputs.monthly_units_sold) * stressMultiplier;
+    }
+    if (inputs.selling_price_per_unit !== undefined) {
+      engineInputs.selling_price_per_unit = Number(inputs.selling_price_per_unit);
+    }
+    if (inputs.variable_cost_per_unit !== undefined) {
+      engineInputs.variable_cost_per_unit = Number(inputs.variable_cost_per_unit);
+    }
+    if (inputs.monthly_household_nonbusiness_income !== undefined) {
+      engineInputs.monthly_household_nonbusiness_income = Number(inputs.monthly_household_nonbusiness_income);
+    }
+    if (inputs.monthly_household_essential_expenses !== undefined) {
+      engineInputs.monthly_household_essential_expenses = Number(inputs.monthly_household_essential_expenses);
+    }
+    if (inputs.existing_monthly_household_debt_payments !== undefined) {
+      engineInputs.existing_monthly_household_debt_payments = Number(inputs.existing_monthly_household_debt_payments);
+    }
 
     const result = calculateFinancialAssessment(engineInputs, DEMO_POLICY);
     setAssessmentResult(result);
-    setSchemeResult({ isMicroFinance: projectCost <= 140000 });
   };
 
-  const handleStressTrigger = () => {
-    runCalculation(0.8); // 20% drop in sales
+  const handleStressTrigger = (scenario: string) => {
+    runCalculation(1, scenario); 
   };
+
+  const marginAmount = Number(inputs.available_margin_capital) || 0;
+  const currentScheme = getSIHSchemeTerms(marginAmount);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -78,7 +96,11 @@ export default function RuralInterviewScreen() {
         </View>
 
         {showStructuring && inputs.available_margin_capital && (
-          <FinancialStructuringAnimation marginCapital={Number(inputs.available_margin_capital)} />
+          <FinancialStructuringAnimation 
+            marginCapital={marginAmount} 
+            projectCost={currentScheme.projectCost}
+            loanAmount={currentScheme.maxLoanComponent}
+          />
         )}
 
         {!assessmentResult ? (
@@ -98,16 +120,18 @@ export default function RuralInterviewScreen() {
           )
         ) : (
           <View style={styles.resultsContainer}>
-            <HyperLocalMarketRadar />
+            <HyperLocalMarketRadar location={inputs.location} />
             
-            <SchemeRoutePath isMicroFinance={schemeResult.isMicroFinance} />
+            {schemeResult && (
+              <SchemeRoutePath isMicroFinance={schemeResult.isMicroFinance} />
+            )}
             
-            {assessmentResult.emi && (
+            {assessmentResult.emi && schemeResult && (
               <RepaymentTimeline 
                 loanAmount={assessmentResult.capitalized_principal || 0} 
-                moratoriumMonths={3} 
+                moratoriumMonths={schemeResult.moratoriumMonths} 
                 emi={assessmentResult.emi} 
-                totalMonths={36} 
+                totalMonths={schemeResult.tenureMonths} 
               />
             )}
 

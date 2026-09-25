@@ -5,11 +5,15 @@ export const ReadinessResult: React.FC<{ status: string }> = ({ status }) => {
   const getReadiness = () => {
     switch(status) {
       case 'READY_FOR_FINANCE_REVIEW':
-        return { title: 'वित्तीय समीक्षा के लिए तैयार', icon: '✅', color: '#2e7d32', bg: '#e8f5e9', desc: 'आपका प्लान मजबूत है। आप लोन के लिए आवेदन कर सकते हैं।' };
+        return { title: 'वित्तीय समीक्षा के लिए तैयार', icon: '✅', color: '#2e7d32', bg: '#e8f5e9', desc: 'आपकी जानकारी वित्तीय समीक्षा के लिए तैयार है। अंतिम पात्रता संबंधित संस्था के नियमों के अनुसार होगी।' };
       case 'TEST_FIRST':
         return { title: 'पहले छोटे स्तर पर आज़माएँ', icon: '🌱', color: '#f57f17', bg: '#fff3e0', desc: 'जोखिम कम करने के लिए शुरुआत कम पूंजी से करें।' };
       case 'HIGH_RISK':
         return { title: 'अभी जोखिम ज्यादा है', icon: '⚠️', color: '#c62828', bg: '#ffebee', desc: 'प्लान में बदलाव करें। EMI देना मुश्किल हो सकता है।' };
+      case 'MODIFY':
+        return { title: 'योजना में बदलाव करें', icon: '🔄', color: '#1565c0', bg: '#e3f2fd', desc: 'अपने प्लान में कुछ बदलाव करके फिर से कोशिश करें।' };
+      case 'INCOMPLETE':
+      case 'INSUFFICIENT_DATA':
       default:
         return { title: 'जानकारी पूरी करें', icon: '📝', color: '#424242', bg: '#f5f5f5', desc: 'निर्णय के लिए और जानकारी चाहिए।' };
     }

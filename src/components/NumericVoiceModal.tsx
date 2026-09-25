@@ -188,6 +188,11 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
                 ? `${t('voice_listening') || 'Listening...'} (${langNames[currentLang] || 'English'})`
                 : t('voice_tap_to_speak') || 'Tap mic to speak'}
             </Text>
+            {Platform.OS !== 'web' && (
+              <Text style={{ color: '#d32f2f', fontSize: 10, marginTop: 5, fontWeight: 'bold' }}>
+                DEMO VOICE INPUT
+              </Text>
+            )}
           </View>
 
           {/* Recognized Text & Interpretation */}

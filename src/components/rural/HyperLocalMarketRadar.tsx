@@ -2,7 +2,12 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { TrustBadge } from './TrustBadge';
 
-export const HyperLocalMarketRadar: React.FC = () => {
+interface Props {
+  location?: string;
+}
+
+export const HyperLocalMarketRadar: React.FC<Props> = ({ location }) => {
+  const displayLocation = location || 'रामपुर';
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -13,7 +18,7 @@ export const HyperLocalMarketRadar: React.FC = () => {
         {/* Mock Radar Visual */}
         <View style={styles.radarCircle}>
           <View style={styles.centerDot} />
-          <Text style={[styles.pin, { top: 20, left: 50 }]}>🏘️ रामपुर</Text>
+          <Text style={[styles.pin, { top: 20, left: 50 }]}>🏘️ {displayLocation}</Text>
           <Text style={[styles.pin, { top: 80, left: 120 }]}>🏪 मंडी</Text>
           <Text style={[styles.pin, { top: 120, left: 20 }]}>🏭 कॉम्पटीटर</Text>
         </View>

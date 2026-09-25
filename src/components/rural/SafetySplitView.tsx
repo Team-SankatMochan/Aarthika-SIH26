@@ -2,17 +2,17 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 interface Props {
-  businessSafety: 'SAFE' | 'TIGHT' | 'RISK';
-  familySafety: 'SAFE' | 'TIGHT' | 'RISK';
+  businessSafety: string;
+  familySafety: string;
 }
 
 export const SafetySplitView: React.FC<Props> = ({ businessSafety, familySafety }) => {
   const getStatus = (status: string) => {
     switch(status) {
-      case 'SAFE': return { text: 'सुरक्षित ✓', color: '#2e7d32', bg: '#e8f5e9' };
-      case 'TIGHT': return { text: 'दबाव में ⚠️', color: '#f57f17', bg: '#fff3e0' };
-      case 'RISK': return { text: 'खतरे में ❌', color: '#c62828', bg: '#ffebee' };
-      default: return { text: '-', color: '#666', bg: '#eee' };
+      case 'READY_FOR_FINANCE_REVIEW': return { text: 'प्रबंधनीय ✓', color: '#2e7d32', bg: '#e8f5e9' }; // manageable
+      case 'HIGH_RISK': return { text: 'दबाव/खतरा ⚠️', color: '#c62828', bg: '#ffebee' }; // pressure/risk
+      case 'INSUFFICIENT_DATA': return { text: 'अधिक जानकारी चाहिए', color: '#f57f17', bg: '#fff3e0' }; // more info needed
+      default: return { text: 'अज्ञात', color: '#666', bg: '#eee' };
     }
   };
 

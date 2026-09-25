@@ -160,6 +160,7 @@ export const useApp = () => useContext(AppContext);
 
 export default function App() {
   const [currentLang, setCurrentLang] = useState('en');
+  // eslint-disable-next-line react-hooks/immutability
   _tGlobal.currentLang = currentLang;
   const [currentScreen, setCurrentScreen] = useState('signup');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -425,7 +426,7 @@ function HomeScreen() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [businessQuery, setBusinessQuery] = useState('');
   const carouselRef = useRef<any>(null);
-  const scrollX = useRef(new Animated.Value(0)).current;
+  const [scrollX] = useState(() => new Animated.Value(0));
 
   const handleTextSubmit = () => {
     if (businessQuery.trim().length > 0) {
@@ -1201,11 +1202,9 @@ function RiskTestScreen() {
 
   const isGeneratingRef = useRef(false);
 
-  useEffect(() => {
-    if (aiReport && aiReport.business_id === activeBusinessId) return;
-    if (isGeneratingRef.current) return;
-    generateReport();
-  }, [activeBusinessId]);
+
+
+
 
   const generateReport = async () => {
     isGeneratingRef.current = true;
@@ -1281,7 +1280,14 @@ function RiskTestScreen() {
     }
   };
 
-  const transformReportToDashboard = (report: any, business: any): any => {
+  useEffect(() => {
+    if (aiReport && aiReport.business_id === activeBusinessId) return;
+    if (isGeneratingRef.current) return;
+    generateReport();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBusinessId]);
+
+  function transformReportToDashboard(report: any, business: any): any {
     const setupCost = business?.setupCost || 0;
     const monthlyFixed = business?.monthlyFixed || 0;
     const pricePerUnit = business?.pricePerUnit || 0;
@@ -1305,7 +1311,7 @@ function RiskTestScreen() {
       existing_monthly_household_debt_payments: 0
     };
     
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { calculateFinancialAssessment } = require('../../engine/financeCalculator');
     const result = calculateFinancialAssessment(inputs, { minimum_business_dscr: 1.2, maximum_household_debt_ratio: 0.5 });
 

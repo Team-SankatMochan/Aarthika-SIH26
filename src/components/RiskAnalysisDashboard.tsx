@@ -30,12 +30,12 @@ export interface RiskData {
   marketRisk: number; // 0-1
   operationalRisk: number; // 0-1
   swot: {
-    strengths: Array<{ finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }>;
-    weaknesses: Array<{ finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }>;
-    opportunities: Array<{ finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }>;
-    threats: Array<{ finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }>;
+    strengths: { finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }[];
+    weaknesses: { finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }[];
+    opportunities: { finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }[];
+    threats: { finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }[];
   };
-  risks: Array<{
+  risks: {
     risk: string;
     category: string;
     probability: number; // 0-1
@@ -43,7 +43,7 @@ export interface RiskData {
     severity: 'Low' | 'Medium' | 'High' | 'Critical';
     financialExposure: number;
     mitigation: string;
-  }>;
+  }[];
   financials: {
     monthlyRevenue: number;
     monthlyExpenses: number;
@@ -52,7 +52,7 @@ export interface RiskData {
     breakEvenRevenue: number;
     safetyMargin: number;
   };
-  scenarios: Array<{
+  scenarios: {
     name: string;
     revenueChange: number;
     costChange: number;
@@ -60,7 +60,7 @@ export interface RiskData {
     monthlyExpenses: number;
     loanEMI: number;
     netCashFlow: number;
-  }>;
+  }[];
   recommendation: {
     decision: 'GO' | 'CAUTION' | 'NO-GO';
     rationale: string;
@@ -80,7 +80,7 @@ export interface RiskData {
     loanTenureMonths: number;
   };
   /** Pre-computed 12-month cash flow series (optional; synthesized from financials if absent). */
-  cashFlow?: Array<{ month: string; revenue: number; expenses: number; net: number }>;
+  cashFlow?: { month: string; revenue: number; expenses: number; net: number }[];
 }
 
 interface RiskAnalysisDashboardProps {
@@ -1121,11 +1121,11 @@ function compactINR(n: number): string {
 }
 
 /** Build a 12-month cash-flow projection from the report's financials + base inputs. */
-function buildCashFlowSeries(riskData: RiskData): Array<{ month: string; revenue: number; expenses: number; net: number }> {
+function buildCashFlowSeries(riskData: RiskData): { month: string; revenue: number; expenses: number; net: number }[] {
   const f = riskData.financials;
   const base = riskData.baseInputs;
 
-  const months: Array<{ month: string; revenue: number; expenses: number; net: number }> = [];
+  const months: { month: string; revenue: number; expenses: number; net: number }[] = [];
   const now = new Date();
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

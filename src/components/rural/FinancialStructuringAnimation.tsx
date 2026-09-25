@@ -3,12 +3,12 @@ import { View, Text, StyleSheet } from 'react-native';
 
 interface Props {
   marginCapital: number;
+  projectCost: number;
+  loanAmount: number;
 }
 
-export const FinancialStructuringAnimation: React.FC<Props> = ({ marginCapital }) => {
+export const FinancialStructuringAnimation: React.FC<Props> = ({ marginCapital, projectCost, loanAmount }) => {
   const [step, setStep] = useState(0);
-  const projectCost = marginCapital / 0.10;
-  const loanAmount = projectCost * 0.90;
 
   useEffect(() => {
     const t1 = setTimeout(() => setStep(1), 1500);

@@ -121,14 +121,27 @@ class SpeechToTextService {
     // On native devices, simulate active microphone listening state
     this.isListening = true;
     options.onStart?.();
+    
+    // DEMO VOICE INPUT for Expo Go
+    this.recognition = setTimeout(() => {
+      if (this.isListening) {
+        // Return a demo string that the parser can handle
+        options.onResult("पचास हजार", true);
+        this.stopListening();
+      }
+    }, 2500);
   }
 
   public stopListening() {
     if (this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch (e) {
-        // ignore
+      if (Platform.OS === 'web') {
+        try {
+          this.recognition.stop();
+        } catch (e) {
+          // ignore
+        }
+      } else {
+        clearTimeout(this.recognition);
       }
       this.recognition = null;
     }

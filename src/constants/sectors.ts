@@ -19,7 +19,7 @@ export interface SectorItem {
     costPerUnit: number;
     salesPerMonth: number;
     personalCost: number;
-    breakdown: Array<{ label: string; cost: number }>;
+    breakdown: { label: string; cost: number }[];
   };
 }
 

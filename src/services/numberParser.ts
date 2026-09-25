@@ -57,6 +57,16 @@ const WORD_NUMBERS: Record<string, number> = {
   'পঁচাশি': 85, 'নব্বই': 90, 'পঁচানব্বই': 95,
   'শত': 100, 'শো': 100, 'হাজার': 1000, 'লাখ': 100000, 'লক্ষ': 100000, 'কোটি': 10000000,
   'দেড়': 1.5, 'আড়াই': 2.5,
+
+  // Hinglish / Latin script Indian words
+  'ek': 1, 'do': 2, 'teen': 3, 'chaar': 4, 'char': 4, 'paanch': 5, 'panch': 5,
+  'chhah': 6, 'che': 6, 'saat': 7, 'aath': 8, 'nau': 9, 'das': 10,
+  'gyaarah': 11, 'baarah': 12, 'terah': 13, 'chaudah': 14, 'pandrah': 15,
+  'solah': 16, 'satrah': 17, 'atharah': 18, 'unnees': 19, 'bees': 20,
+  'pachees': 25, 'tees': 30, 'paintees': 35, 'chaalees': 40, 'chalis': 40, 'paintaalees': 45, 'pachaas': 50, 'pachas': 50,
+  'pachpan': 55, 'saath': 60, 'painsath': 65, 'sattar': 70, 'pachhattar': 75, 'assee': 80, 'assi': 80,
+  'pachaasee': 85, 'pachasi': 85, 'nabbe': 90, 'panchaanbe': 95,
+  'sau': 100, 'dedh': 1.5, 'dhaai': 2.5, 'saadhe': 0.5, 'sava': 1.25,
 };
 
 // Multipliers
