@@ -5,7 +5,7 @@ import { globalInputStore, useCanonicalInputs, ProvenanceSource } from '../engin
 import { InterviewEngine } from '../engine/InterviewEngine';
 import { VoiceQuestionCard } from '../components/rural/VoiceQuestionCard';
 import { FinancialStructuringAnimation } from '../components/rural/FinancialStructuringAnimation';
-import { TrustBadge } from '../components/rural/TrustBadge';
+
 import { HyperLocalMarketRadar } from '../components/rural/HyperLocalMarketRadar';
 import { SchemeRoutePath } from '../components/rural/SchemeRoutePath';
 import { RepaymentTimeline } from '../components/rural/RepaymentTimeline';
@@ -159,7 +159,8 @@ export default function RuralInterviewScreen() {
                     monthlyRevenue={assessmentResult.monthly_revenue}
                     totalExpenses={(assessmentResult.monthly_variable_cost || 0) + (assessmentResult.monthly_fixed_cost || 0)}
                     businessCash={assessmentResult.business_cash_available_for_debt_service}
-                    breakEvenUnits={assessmentResult.break_even_units}
+                    breakEvenUnits={assessmentResult.break_even_units ?? null}
+                    breakEvenStatus={assessmentResult.break_even_status}
                   />
                 )}
 

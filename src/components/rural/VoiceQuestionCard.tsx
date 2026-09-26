@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
 import { QuestionConfig } from '../../engine/InterviewEngine';
 import { sttService } from '../../services/stt';
 import { parseSpokenNumber } from '../../services/numberParser';
@@ -38,7 +38,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
       isMounted = false;
       stopSpeaking();
     };
-  }, [question.id]);
+  }, [question.id, question.prompt_hi]);
 
   const handleGlobalIntents = (text: string): boolean => {
     const textLower = text.toLowerCase();
@@ -48,8 +48,10 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
       if (question.allow_estimation) {
         setInDerivationMode(true);
         speak('कोई बात नहीं। मैं अनुमान लगाने में मदद करती हूँ.', 'hi');
-      } else {
+      } else if (question.allow_unknown) {
         onConfirm(null, 'USER_PROVIDED'); // store as unknown
+      } else {
+        speak('यह जानकारी आगे बढ़ने के लिए जरूरी है। कृपया बताएं या लिखें।', 'hi');
       }
       return true;
     }

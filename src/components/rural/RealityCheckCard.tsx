@@ -6,10 +6,11 @@ interface Props {
   monthlyRevenue: number;
   totalExpenses: number;
   businessCash: number;
-  breakEvenUnits: number | string;
+  breakEvenUnits: number | string | null;
+  breakEvenStatus?: string;
 }
 
-export const RealityCheckCard: React.FC<Props> = ({ monthlyRevenue, totalExpenses, businessCash, breakEvenUnits }) => {
+export const RealityCheckCard: React.FC<Props> = ({ monthlyRevenue, totalExpenses, businessCash, breakEvenUnits, breakEvenStatus }) => {
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
@@ -40,7 +41,11 @@ export const RealityCheckCard: React.FC<Props> = ({ monthlyRevenue, totalExpense
         </View>
         <View style={styles.statBox}>
           <Text style={styles.label}>Break-even (कम से कम बिक्री)</Text>
-          <Text style={styles.value}>{breakEvenUnits === 'NO_FINITE_BREAK_EVEN' ? 'N/A' : `${breakEvenUnits} units`}</Text>
+          <Text style={styles.value}>
+            {breakEvenStatus === 'NO_FINITE_BREAK_EVEN' || breakEvenStatus === 'STRUCTURALLY_UNVIABLE' || breakEvenUnits === null 
+              ? 'N/A' 
+              : `${breakEvenUnits} units`}
+          </Text>
         </View>
       </View>
     </View>
