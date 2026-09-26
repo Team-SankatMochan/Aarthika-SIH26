@@ -1,5 +1,6 @@
 import { Database } from '@nozbe/watermelondb';
 import SQLiteAdapter from '@nozbe/watermelondb/adapters/sqlite';
+import LokiJSAdapter from '@nozbe/watermelondb/adapters/lokijs';
 
 import schema from './schema';
 import migrations from './migrations';
@@ -22,28 +23,44 @@ import FinanceAssessment from './FinanceAssessment';
 import Evidence from './Evidence';
 import Decision from './Decision';
 
-// Create adapter with error resilience
-let adapter: SQLiteAdapter;
-try {
-    adapter = new SQLiteAdapter({
-        schema,
-        migrations,
-        jsi: true,
-        onSetUpError: (error) => {
-            console.error('Database setup error:', error);
-        },
-    });
-} catch (error) {
-    console.error('Failed to create SQLiteAdapter:', error);
-    // Create a minimal adapter without migrations as fallback
-    adapter = new SQLiteAdapter({
-        schema,
-        jsi: true,
-        onSetUpError: (err) => {
-            console.error('Database fallback setup error:', err);
-        },
-    });
+// Create adapter with error resilience and safe cross-platform fallback
+function createSafeAdapter() {
+    const isWeb = typeof window !== 'undefined' && typeof document !== 'undefined';
+    if (isWeb) {
+        return new LokiJSAdapter({
+            schema,
+            migrations,
+            useWebWorker: false,
+            useIncrementalIndexedDB: true,
+        });
+    }
+
+    try {
+        // Use jsi: false to prevent "Cannot read property 'initializeJSI' of null"
+        // when running in Expo Go or development client without custom JSI compilation
+        return new SQLiteAdapter({
+            schema,
+            migrations,
+            jsi: false,
+            onSetUpError: (error) => {
+                console.warn('Database setup warning:', error);
+            },
+        });
+    } catch (error) {
+        console.warn('SQLiteAdapter creation failed, using LokiJSAdapter fallback:', error);
+        try {
+            return new LokiJSAdapter({
+                schema,
+                useWebWorker: false,
+            });
+        } catch (err) {
+            console.warn('LokiJS fallback failed, using minimal memory adapter:', err);
+            return new LokiJSAdapter({ schema });
+        }
+    }
 }
+
+const adapter = createSafeAdapter();
 
 export const database = new Database({
     adapter,

@@ -2,8 +2,8 @@ import { calculateFinancialAssessment } from '../financeCalculator';
 
 describe('financeCalculator', () => {
   const policy = {
-    minimum_required_dscr: "1.20",
-    maximum_household_debt_ratio: "0.50"
+    minimum_required_dscr: 1.20,
+    maximum_household_debt_ratio: 0.50
   };
 
   it('calculates properly when inputs are present', () => {

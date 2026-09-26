@@ -1,24 +1,44 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-// API base URL - will be set based on environment
-const getApiBaseUrl = () => {
-  // Check if we are in development mode
-  const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : true;
-  if (isDev) {
-    if (Platform.OS === 'web') {
-      return 'http://localhost:8000';
-    }
-    // Fixed: Pointing directly to host machine IP so Expo Go can reach it
-    return 'http://10.172.185.24:8000';
+/**
+ * API base URL — resolved from environment or clearly marked unavailable.
+ *
+ * Priority:
+ * 1. EXPO_PUBLIC_API_URL environment variable (production/staging)
+ * 2. localhost:8000 for web dev
+ * 3. null — remote backend unavailable, app continues with deterministic offline analytics
+ */
+const getApiBaseUrl = (): string | null => {
+  // Check for explicit env var first (works in dev and production)
+  const envUrl = Constants.expoConfig?.extra?.EXPO_PUBLIC_API_URL
+    ?? (typeof process !== 'undefined' ? process.env.EXPO_PUBLIC_API_URL : undefined);
+
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    return envUrl.trim();
   }
-  // In production, use your deployed backend URL
-  return 'https://your-backend-domain.com';
+
+  // Development fallback for web only
+  const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
+  if (isDev && Platform.OS === 'web') {
+    return 'http://localhost:8000';
+  }
+
+  // No API URL configured — backend is unavailable
+  return null;
 };
 
 const API_BASE_URL = getApiBaseUrl();
 
+/** Whether the remote backend API is configured and reachable. */
+export const isBackendConfigured = API_BASE_URL !== null;
+
 // Generic fetch function with error handling
 const fetchApi = async (endpoint: string, options: RequestInit = {}) => {
+  if (!API_BASE_URL) {
+    throw new Error('BACKEND_UNAVAILABLE: No API URL configured. App is running in offline mode.');
+  }
+
   const url = `${API_BASE_URL}${endpoint}`;
 
   try {
@@ -82,10 +102,26 @@ export const aiReportsApi = {
     fetchApi('/ai/health'),
 };
 
+// User API
+export const userApi = {
+  createUser: (userData: any) =>
+    fetchApi('/users', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    }),
+
+  getUser: (userId: string) =>
+    fetchApi(`/users/${userId}`),
+
+  listUsers: () =>
+    fetchApi('/users'),
+};
+
 // Export all APIs
 export const api = {
   business: businessApi,
   aiReports: aiReportsApi,
+  users: userApi,
 };
 
 export default api;

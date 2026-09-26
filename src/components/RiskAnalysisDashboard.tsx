@@ -865,18 +865,18 @@ function RiskContribution({ riskData }: { riskData: RiskData }) {
 /* ── 9. What-If Simulator ── */
 function WhatIfSimulator({ riskData }: { riskData: RiskData }) {
   const f = riskData.financials;
-  // Defaults derived from the report's financials; replaced by real baseInputs when the
-  // transform supplies them (they come from the user's business plan inputs).
+  // Safety-net defaults if baseInputs is somehow missing.
+  // The canonical analytics pipeline always provides real baseInputs.
   const fallback = {
-    pricePerUnit: f.monthlyRevenue > 0 ? f.monthlyRevenue / (f.monthlyRevenue / 40 || 100) : 40,
-    costPerUnit: 18,
-    salesPerMonth: f.monthlyRevenue / 40 || 100,
-    monthlyFixed: 4000,
-    personalCost: 8000,
-    setupCost: 95000,
-    loanAmount: 47500,
-    interestRatePercent: 12,
-    loanTenureMonths: 24,
+    pricePerUnit: 0,
+    costPerUnit: 0,
+    salesPerMonth: 0,
+    monthlyFixed: 0,
+    personalCost: 0,
+    setupCost: 0,
+    loanAmount: 0,
+    interestRatePercent: 0,
+    loanTenureMonths: 0,
   };
   const base = riskData.baseInputs ?? fallback;
 

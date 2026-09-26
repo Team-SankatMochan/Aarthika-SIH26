@@ -5,9 +5,12 @@
 
 import React, { useState, useEffect, createContext, useContext, useRef, useCallback } from 'react';
 import { router } from 'expo-router';
-import { api } from '../services/api';
+import { api, isBackendConfigured } from '../services/api';
 import { speak, stopSpeaking } from '../services/tts';
+import { generateAnalyticsSnapshot, snapshotToDashboardData, type BusinessPlanInputs, type AnalyticsSnapshot } from '../services/businessAnalytics';
+import { AARTHIKA_CALCULATION_POLICY, getSIHSchemeTerms } from '../engine/SIHSchemeRules';
 import { sttService } from '../services/stt';
+import { parseSpokenNumber } from '../services/numberParser';
 import { AARTHIKA_TRANSLATIONS } from '../constants/translations';
 import { SECTOR_CATALOG, SectorItem } from '../constants/sectors';
 import { PopularSectorCard } from '../components/PopularSectorCard';
@@ -54,29 +57,26 @@ const SNAP_INTERVAL = CARD_WIDTH + 14;
 const _tGlobal: any = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : {});
 _tGlobal.AARTHIKA_TRANSLATIONS = AARTHIKA_TRANSLATIONS;
 
-// Shared helper: map in-memory activeBusiness plan to backend schema
+// Shared helper: map in-memory activeBusiness plan to backend canonical schema.
+// Uses the backend's existing canonical fields — does NOT fabricate arbitrary splits.
 function buildAssumptionsPayload(biz: any, businessId: string): Record<string, unknown> {
-  const setupCost = biz?.setupCost;
-  const monthlyFixed = biz?.monthlyFixed;
-  const pricePerUnit = biz?.pricePerUnit;
-  const costPerUnit = biz?.costPerUnit;
-  const salesPerMonth = biz?.salesPerMonth;
-  const personalCost = biz?.personalCost;
-
   return {
     business_id: businessId,
-    expected_customers: Math.max(1, Math.round(salesPerMonth / 30)),
-    selling_price: pricePerUnit,
-    production_volume: salesPerMonth,
-    raw_material_cost: costPerUnit,
-    labour_cost: personalCost,
-    rent: Math.round(monthlyFixed * 0.4),
-    transport_cost: Math.round(monthlyFixed * 0.3),
-    working_capital: Math.round(setupCost * 0.3),
-    proposed_loan_amount: Math.round(setupCost * 0.5),
-    other_operating_cost: Math.round(monthlyFixed * 0.3),
-    assumption_source: 'ENTREPRENEUR',
-    confidence: 0.75,
+    // Unit economics
+    selling_price: biz?.pricePerUnit ?? null,
+    production_volume: biz?.salesPerMonth ?? null,
+    raw_material_cost: biz?.costPerUnit ?? null,
+    // Monthly business fixed cost — passed as aggregate, NOT split arbitrarily
+    monthly_fixed_cost: biz?.monthlyFixed ?? null,
+    // Household data — separate from business
+    monthly_household_essential_expenses: biz?.personalCost ?? null,
+    // Setup / project cost
+    setup_cost: biz?.setupCost ?? null,
+    // Available margin capital if user provided
+    available_margin_capital: biz?.availableMarginCapital ?? null,
+    // Loan: only if user explicitly supplied, not fabricated
+    proposed_loan_amount: biz?.requestedLoanAmount ?? null,
+    assumption_source: biz?.presetSource === 'SUGGESTED_ESTIMATE' ? 'PRESET_UNCONFIRMED' : 'ENTREPRENEUR',
   };
 }
 
@@ -113,7 +113,7 @@ export const COLORS = {
 const AppContext = createContext<any>({
   currentLang: 'en',
   setCurrentLang: (lang: string) => {},
-  currentScreen: 'signup',
+  currentScreen: 'touchless_auth',
   navigateTo: (screen: string) => {},
   user: {
     fullName: '',
@@ -148,6 +148,7 @@ const AppContext = createContext<any>({
   aiReport: null,
   setAiReport: () => {},
   isAuthenticated: false,
+  saveTouchlessProfile: async (_data: any) => {},
   handleSignup: () => {},
   handleLogin: () => {},
   handleLogout: () => {},
@@ -162,7 +163,7 @@ export default function App() {
   const [currentLang, setCurrentLang] = useState('en');
   // eslint-disable-next-line react-hooks/immutability
   _tGlobal.currentLang = currentLang;
-  const [currentScreen, setCurrentScreen] = useState('home');
+  const [currentScreen, setCurrentScreen] = useState('touchless_auth');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState({
     fullName: '',
@@ -190,12 +191,17 @@ export default function App() {
         }
         if (userJson) {
           const parsed = JSON.parse(userJson);
-          setUser(parsed);
-          setIsAuthenticated(true);
-          setCurrentScreen('home');
+          if (parsed && (parsed.fullName || parsed.firstName || parsed.occupation)) {
+            setUser(parsed);
+            setIsAuthenticated(true);
+            setCurrentScreen('home');
+            return;
+          }
         }
+        setCurrentScreen('touchless_auth');
       } catch (e) {
         console.warn('Could not load user from storage', e);
+        setCurrentScreen('touchless_auth');
       }
     })();
   }, []);
@@ -210,11 +216,12 @@ export default function App() {
     costPerUnit: 0,
     salesPerMonth: 0,
     personalCost: 0,
-    breakdown: [
-      { label: 'Drip Irrigation & Land Prep', cost: 45000 },
-      { label: 'Certified Seeds & Bio-Fertilizer', cost: 30000 },
-      { label: 'Sprayer & Crates', cost: 20000 },
-    ],
+    availableMarginCapital: null as number | null,
+    householdIncome: null as number | null,
+    existingEMI: null as number | null,
+    requestedLoanAmount: null as number | null,
+    presetSource: '' as string, // 'SUGGESTED_ESTIMATE' for presets, '' for custom
+    breakdown: [] as { label: string; cost: number }[],
   });
   const [activeBusinessId, setActiveBusinessId] = useState(null);
   const [aiReport, setAiReport] = useState(null);
@@ -243,6 +250,54 @@ export default function App() {
 
   const navigateTo = (screen: string) => {
     setCurrentScreen(screen);
+  };
+
+  const saveTouchlessProfile = async (profileData: { name: string; place: string; occupation: string; age: string }) => {
+    const nameParts = (profileData.name || '').trim().split(' ');
+    const updatedUser = {
+      ...user,
+      fullName: profileData.name.trim(),
+      firstName: nameParts[0] || profileData.name.trim(),
+      lastName: nameParts.slice(1).join(' ') || '',
+      village: profileData.place.trim(),
+      district: profileData.place.trim(),
+      occupation: profileData.occupation.trim(),
+      age: profileData.age.toString().trim(),
+      interestedSector: profileData.occupation.trim(),
+      backendUserId: null as string | null,
+    };
+
+    if (isBackendConfigured) {
+      try {
+        const backendRes = await api.users.createUser({
+          name: updatedUser.fullName,
+          available_capital: 0,
+          experience: updatedUser.occupation,
+          skills: [updatedUser.occupation],
+          family_workforce: 1,
+          preferences: {
+            place: updatedUser.village,
+            occupation: updatedUser.occupation,
+            age: updatedUser.age,
+          },
+        });
+        if (backendRes?.id) {
+          updatedUser.backendUserId = backendRes.id;
+        }
+      } catch (err) {
+        console.warn('Touchless user backend sync failed:', err);
+      }
+    }
+
+    setUser(updatedUser);
+    setIsAuthenticated(true);
+    setCurrentScreen('home');
+    try {
+      await AsyncStorage.setItem('@user', JSON.stringify(updatedUser));
+      await AsyncStorage.setItem('@touchless_profile', JSON.stringify(profileData));
+    } catch (e) {
+      console.warn('Failed to persist touchless profile', e);
+    }
   };
 
   const handleSignup = async (userData: any) => {
@@ -276,8 +331,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    stopSpeaking();
     setIsAuthenticated(false);
-    setCurrentScreen('login');
+    setCurrentScreen('touchless_auth');
     setUser({
       fullName: '',
       firstName: '',
@@ -315,6 +371,7 @@ export default function App() {
         aiReport,
         setAiReport,
         isAuthenticated,
+        saveTouchlessProfile,
         handleSignup,
         handleLogin,
         handleLogout,
@@ -332,8 +389,9 @@ export default function App() {
 
           {/* Dynamic Screen Renderer */}
           <View style={styles.screenContainer}>
-            {currentScreen === 'signup' && <View />}
-            {currentScreen === 'login' && <View />}
+            {(currentScreen === 'touchless_auth' || currentScreen === 'signup' || currentScreen === 'login') && (
+              <TouchlessAuthScreen />
+            )}
             {currentScreen === 'home' && <HomeScreen />}
             {currentScreen === 'my_plan' && <MyPlanScreen />}
             {currentScreen === 'risk_test' && <RiskTestScreen />}
@@ -344,9 +402,32 @@ export default function App() {
           </View>
 
           {/* Mobile Bottom Tab Navigation */}
-          {isAuthenticated && currentScreen !== 'signup' && currentScreen !== 'login' && (
+          {isAuthenticated && currentScreen !== 'touchless_auth' && currentScreen !== 'signup' && currentScreen !== 'login' && (
             <SafeAreaView edges={['bottom']} style={{ backgroundColor: COLORS.surfaceContainerLowest }}>
-              <View />
+              <View style={styles.tabBar}>
+                {[
+                  { key: 'home', icon: '🏠', label: t('tab_home') || 'Home' },
+                  { key: 'my_plan', icon: '📋', label: t('tab_plan') || 'Plan' },
+                  { key: 'risk_test', icon: '📊', label: t('tab_risk') || 'Risk' },
+                  { key: 'profile', icon: '👤', label: t('tab_profile') || 'Profile' },
+                ].map((tab) => {
+                  const isActive = currentScreen === tab.key;
+                  return (
+                    <TouchableOpacity
+                      key={tab.key}
+                      style={[styles.tabItem, isActive && styles.activeTabItem]}
+                      onPress={() => navigateTo(tab.key)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={isActive ? styles.activeTabIconWrap : styles.tabIconWrap}>
+                        <Text style={isActive ? styles.activeTabIcon : styles.tabIcon}>{tab.icon}</Text>
+                      </View>
+                      <Text style={[styles.tabLabel, isActive && styles.activeTabLabel]}>{tab.label}</Text>
+                      {isActive && <View style={styles.activeTabDot} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </SafeAreaView>
           )}
 
@@ -403,7 +484,7 @@ function MobileHeader() {
     <View style={styles.header}>
       <Pressable
         style={styles.brandingContainer}
-        onPress={() => (isAuthenticated ? navigateTo('home') : navigateTo('signup'))}
+        onPress={() => (isAuthenticated ? navigateTo('home') : navigateTo('touchless_auth'))}
       >
         <Image source={APP_LOGO} style={styles.logoImage} resizeMode="contain" />
       </Pressable>
@@ -430,7 +511,24 @@ function HomeScreen() {
 
   const handleTextSubmit = () => {
     if (businessQuery.trim().length > 0) {
-      setActiveBusiness((prev: any) => ({ ...prev, title: businessQuery, sector: 'custom' }));
+      // Reset stale assumptions when starting a new custom business
+      setActiveBusiness({
+        sector: 'custom',
+        title: businessQuery,
+        setupCost: 0,
+        monthlyFixed: 0,
+        unitType: '',
+        pricePerUnit: 0,
+        costPerUnit: 0,
+        salesPerMonth: 0,
+        personalCost: 0,
+        availableMarginCapital: null,
+        householdIncome: null,
+        existingEMI: null,
+        requestedLoanAmount: null,
+        presetSource: '',
+        breakdown: [],
+      });
       navigateTo('business_details');
     }
   };
@@ -450,6 +548,11 @@ function HomeScreen() {
       costPerUnit: sector.presets.costPerUnit,
       salesPerMonth: sector.presets.salesPerMonth,
       personalCost: sector.presets.personalCost,
+      availableMarginCapital: null,
+      householdIncome: null,
+      existingEMI: null,
+      requestedLoanAmount: null,
+      presetSource: 'SUGGESTED_ESTIMATE',
       breakdown: sector.presets.breakdown,
     });
     navigateTo('business_details');
@@ -474,7 +577,7 @@ function HomeScreen() {
         </View>
 
         <Text style={styles.heroGreetingTitle}>
-          {t('greeting_prefix') || 'Namaste'}, {user.firstName || 'Ramesh'} 🙏
+          {t('greeting_prefix') || 'Namaste'}, {user.firstName || t('user_placeholder') || ''} 🙏
         </Text>
 
         <Text style={styles.heroGreetingSub}>
@@ -530,19 +633,21 @@ function HomeScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* SIH DEMO MODE BUTTON */}
+        {/* Check My Business Plan — Guided Interview */}
         <TouchableOpacity
           style={[styles.voiceHeroCard, { backgroundColor: '#3f6653', marginTop: 15 }]}
           onPress={() => router.push('/rural-interview' as any)}
           activeOpacity={0.88}
         >
           <View style={[styles.voiceHeroMicWrap, { backgroundColor: '#beead1' }]}>
-            <Text style={{ fontSize: 24 }}>🚀</Text>
+            <Text style={{ fontSize: 24 }}>📋</Text>
           </View>
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={[styles.voiceHeroTitle, { color: '#ffffff' }]}>SIH Demo Mode</Text>
+            <Text style={[styles.voiceHeroTitle, { color: '#ffffff' }]}>
+              {t('check_business_plan') || 'Check My Business Plan'}
+            </Text>
             <Text style={[styles.voiceHeroSub, { color: '#e0e0e0' }]}>
-              New Rural-First Guided Interview Experience
+              {t('check_business_plan_sub') || 'बोलकर अपना बिज़नेस जांचें'}
             </Text>
           </View>
         </TouchableOpacity>
@@ -675,6 +780,11 @@ function ExploreSectorsScreen() {
       costPerUnit: sector.presets.costPerUnit,
       salesPerMonth: sector.presets.salesPerMonth,
       personalCost: sector.presets.personalCost,
+      availableMarginCapital: null,
+      householdIncome: null,
+      existingEMI: null,
+      requestedLoanAmount: null,
+      presetSource: 'SUGGESTED_ESTIMATE',
       breakdown: sector.presets.breakdown,
     });
     navigateTo('business_details');
@@ -1003,68 +1113,78 @@ function BusinessDetailsScreen() {
 }
 
 // ----------------------------------------------------
-// MY PLAN SCREEN (FULLY LOCALIZED & MATH ENGINE)
+// MY PLAN SCREEN — Uses canonical analytics snapshot.
+// Business economics and household affordability are SEPARATE.
 // ----------------------------------------------------
 function MyPlanScreen() {
   const { activeBusiness, navigateTo, setActiveBusinessId, t } = useApp();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const setupCost = activeBusiness?.setupCost ?? 95000;
-  const monthlyFixed = activeBusiness?.monthlyFixed ?? 4000;
-  const pricePerUnit = activeBusiness?.pricePerUnit ?? 40;
-  const costPerUnit = activeBusiness?.costPerUnit ?? 18;
-  const salesPerMonth = activeBusiness?.salesPerMonth ?? 1800;
-  const personalCost = activeBusiness?.personalCost ?? 8000;
-  const breakdown = activeBusiness?.breakdown?.length
-    ? activeBusiness.breakdown
-    : [
-        { label: 'Land, equipment & setup', cost: setupCost * 0.6 },
-        { label: 'Raw material & inputs', cost: setupCost * 0.3 },
-        { label: 'Contingency buffer', cost: setupCost * 0.1 },
-      ];
+  // Build canonical plan inputs from activeBusiness
+  const planInputs: BusinessPlanInputs = {
+    businessCategory: activeBusiness?.sector || undefined,
+    businessTitle: activeBusiness?.title || undefined,
+    setupCost: activeBusiness?.setupCost || undefined,
+    availableMarginCapital: activeBusiness?.availableMarginCapital ?? undefined,
+    monthlyUnitsSold: activeBusiness?.salesPerMonth || undefined,
+    sellingPricePerUnit: activeBusiness?.pricePerUnit || undefined,
+    variableCostPerUnit: activeBusiness?.costPerUnit || undefined,
+    monthlyBusinessFixedCost: activeBusiness?.monthlyFixed || undefined,
+    householdEssentialExpenses: activeBusiness?.personalCost || undefined,
+    householdNonBusinessIncome: activeBusiness?.householdIncome ?? undefined,
+    existingHouseholdEMI: activeBusiness?.existingEMI ?? undefined,
+    requestedLoanAmount: activeBusiness?.requestedLoanAmount ?? undefined,
+  };
 
-  const monthlyRevenue = salesPerMonth * pricePerUnit;
-  const monthlyVariableCost = salesPerMonth * costPerUnit;
-  const monthlyGrossProfit = monthlyRevenue - monthlyVariableCost;
-  const monthlyNetProfit = monthlyGrossProfit - monthlyFixed - personalCost;
-  const totalMonthlyExpenses = monthlyVariableCost + monthlyFixed + personalCost;
-  const grossMarginPct = monthlyRevenue > 0 ? (monthlyGrossProfit / monthlyRevenue) * 100 : 0;
-  const netMarginPct = monthlyRevenue > 0 ? (monthlyNetProfit / monthlyRevenue) * 100 : 0;
-  const contributionPerUnit = pricePerUnit - costPerUnit;
-  const breakEvenRevenue =
-    contributionPerUnit > 0
-      ? ((monthlyFixed + personalCost) / contributionPerUnit) * pricePerUnit
-      : 0;
-  const safetyMargin = monthlyRevenue - breakEvenRevenue;
-  const safetyMarginPct = monthlyRevenue > 0 ? (safetyMargin / monthlyRevenue) * 100 : 0;
-  const roiPct = setupCost > 0 ? (monthlyNetProfit * 12) / setupCost * 100 : 0;
-  const paybackMonths = monthlyNetProfit > 0 ? Math.ceil(setupCost / monthlyNetProfit) : null;
+  // Generate the canonical analytics snapshot
+  const snapshot = generateAnalyticsSnapshot(planInputs);
 
-  const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  const setupCost = activeBusiness?.setupCost ?? 0;
+  const breakdown = activeBusiness?.breakdown?.length ? activeBusiness.breakdown : [];
+  const isPreset = activeBusiness?.presetSource === 'SUGGESTED_ESTIMATE';
+
+  const fmt = (n: number | null | undefined) => {
+    if (n == null) return t('need_info') || 'Need more information';
+    return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  };
+
+  const fmtStatus = (status: string | null | undefined) => {
+    if (!status) return t('need_info') || 'Need more information';
+    if (status === 'NO_FINITE_BREAK_EVEN') return t('no_finite_breakeven') || 'No finite break-even';
+    if (status === 'STRUCTURALLY_UNVIABLE') return t('structurally_unviable') || 'Current price/cost structure cannot break even';
+    if (status === 'VIABLE') return t('viable') || 'Viable';
+    if (status === 'READY_FOR_FINANCE_REVIEW') return '✅ ' + (t('ready_for_review') || 'Ready for Review');
+    if (status === 'HIGH_RISK') return '⚠️ ' + (t('high_risk') || 'High Risk');
+    if (status === 'INCOMPLETE') return '📝 ' + (t('incomplete') || 'Incomplete');
+    if (status === 'INSUFFICIENT_DATA') return '📝 ' + (t('insufficient_data') || 'Need more information');
+    return status;
+  };
 
   const handleRunRiskTest = async () => {
     setIsSubmitting(true);
     try {
-      const businessData = {
-        user_id: 'user_123',
-        business_name: activeBusiness.title || 'Organic Vegetable Farming',
-        business_category: activeBusiness.sector || 'farming',
-        description: JSON.stringify(activeBusiness),
-        status: 'DRAFT',
-      };
-      try {
-        const response = await api.business.createBusiness(businessData);
-        if (response && response.id) {
-          setActiveBusinessId(response.id);
-          try {
-            await api.business.createAssumption(response.id, buildAssumptionsPayload(activeBusiness, response.id));
-          } catch (assumptionErr) {
-            console.warn('Failed to persist assumptions:', (assumptionErr as Error).message);
+      if (isBackendConfigured) {
+        const businessData = {
+          user_id: 'user_123',
+          business_name: activeBusiness.title || 'Business Plan',
+          business_category: activeBusiness.sector || 'custom',
+          description: JSON.stringify(activeBusiness),
+          status: 'DRAFT',
+        };
+        try {
+          const response = await api.business.createBusiness(businessData);
+          if (response && response.id) {
+            setActiveBusinessId(response.id);
+            try {
+              await api.business.createAssumption(response.id, buildAssumptionsPayload(activeBusiness, response.id));
+            } catch (assumptionErr) {
+              console.warn('Failed to persist assumptions:', (assumptionErr as Error).message);
+            }
           }
+        } catch (e) {
+          console.warn('Backend unavailable, continuing with local engine:', (e as Error).message);
+          setActiveBusinessId(null);
         }
-      } catch (e) {
-        console.warn('Backend unavailable, continuing with local engine:', (e as Error).message);
-        setActiveBusinessId(null);
       }
       navigateTo('risk_test');
     } catch (error) {
@@ -1078,202 +1198,279 @@ function MyPlanScreen() {
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <View style={styles.centerSection}>
         <Text style={styles.screenHeaderTitle}>{t('my_business_plan_title') || 'My Business Plan'}</Text>
-        <Text style={styles.screenHeaderSub}>{activeBusiness.title || 'Farming'} - {t('phase_1_sub') || 'Phase 1'}</Text>
+        <Text style={styles.screenHeaderSub}>{activeBusiness.title || 'Business'} - {t('phase_1_sub') || 'Phase 1'}</Text>
       </View>
 
-      <View style={styles.bentoCard}>
-        <Text style={styles.bentoLabel}>{t('setup_costs_card') || 'Setup Costs'}</Text>
-        <Text style={styles.bentoValuePrimary}>{fmt(setupCost)}</Text>
-        <Text style={styles.bentoSub}>{t('initial_inv_sub') || 'Initial investment required'}</Text>
-      </View>
+      {/* Preset notice */}
+      {isPreset && (
+        <View style={[styles.card, { backgroundColor: '#fff8e1', borderColor: '#ffe082' }]}>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: '#f57f17' }}>
+            {t('suggested_estimate_notice') || '⚠ Suggested starting estimates — please confirm or edit'}
+          </Text>
+        </View>
+      )}
 
-      <View style={styles.bentoCard}>
-        <Text style={styles.bentoLabel}>{t('monthly_expenses_card') || 'Monthly Expenses'}</Text>
-        <Text style={styles.bentoValuePrimary}>{fmt(totalMonthlyExpenses)}</Text>
-        <Text style={styles.bentoSub}>
-          {fmt(monthlyVariableCost)} {t('variable_cost_label') || 'variable'} · {fmt(monthlyFixed + personalCost)} {t('fixed_living_label') || 'fixed + living'}
-        </Text>
-      </View>
+      {setupCost > 0 && (
+        <View style={styles.bentoCard}>
+          <Text style={styles.bentoLabel}>{t('setup_costs_card') || 'Setup Costs'}</Text>
+          <Text style={styles.bentoValuePrimary}>{fmt(setupCost)}</Text>
+          <Text style={styles.bentoSub}>{t('initial_inv_sub') || 'Initial investment required'}</Text>
+        </View>
+      )}
 
-      <View style={[styles.bentoCard, { backgroundColor: COLORS.secondaryContainer }]}>
-        <Text style={[styles.bentoLabel, { color: COLORS.secondary }]}>
-          {t('estimated_profit_card') || 'Estimated Profit'}
-        </Text>
-        <Text style={[styles.bentoValueSecondary, { color: monthlyNetProfit >= 0 ? COLORS.secondary : COLORS.error }]}>
-          {fmt(monthlyNetProfit)}
-        </Text>
-        <Text style={[styles.bentoSub, { color: COLORS.onSecondaryContainer }]}>
-          {t('projected_net_sub') || 'Projected net per month'}
-        </Text>
-      </View>
-
-      {/* Financial Math Engine */}
-      <View style={[styles.card, { marginTop: 16 }]}>
-        <Text style={styles.cardSectionTitle}>{t('financial_math_section') || 'Financial Math Engine'}</Text>
+      {/* Business Economics — NO household data mixed in */}
+      <View style={[styles.card, { marginTop: 8 }]}>
+        <Text style={styles.cardSectionTitle}>{t('business_economics') || 'Business Economics'}</Text>
         <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('monthly_revenue_label') || 'Monthly Revenue'} ({salesPerMonth} × {fmt(pricePerUnit)})</Text>
-          <Text style={styles.breakdownValue}>{fmt(monthlyRevenue)}</Text>
+          <Text style={styles.breakdownLabel}>{t('monthly_revenue_label') || 'Monthly Revenue'}</Text>
+          <Text style={styles.breakdownValue}>{fmt(snapshot.monthlyRevenue)}</Text>
         </View>
         <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('variable_cost_label') || 'Variable Cost'} ({salesPerMonth} × {fmt(costPerUnit)})</Text>
-          <Text style={styles.breakdownValue}>−{fmt(monthlyVariableCost)}</Text>
+          <Text style={styles.breakdownLabel}>{t('variable_cost_label') || 'Monthly Variable Cost'}</Text>
+          <Text style={styles.breakdownValue}>{snapshot.monthlyVariableCost != null ? `−${fmt(snapshot.monthlyVariableCost)}` : fmt(null)}</Text>
         </View>
         <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('gross_profit_label') || 'Gross Profit'} ({grossMarginPct.toFixed(1)}%)</Text>
-          <Text style={[styles.breakdownValue, { color: COLORS.secondary }]}>{fmt(monthlyGrossProfit)}</Text>
+          <Text style={styles.breakdownLabel}>{t('fixed_costs') || 'Monthly Fixed Business Cost'}</Text>
+          <Text style={styles.breakdownValue}>{snapshot.monthlyFixedCost != null ? `−${fmt(snapshot.monthlyFixedCost)}` : fmt(null)}</Text>
         </View>
         <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('fixed_living_label') || 'Fixed + Living Costs'}</Text>
-          <Text style={styles.breakdownValue}>−{fmt(monthlyFixed + personalCost)}</Text>
+          <Text style={styles.breakdownLabel}>{t('contribution_margin') || 'Contribution Margin/Unit'}</Text>
+          <Text style={[styles.breakdownValue, { color: (snapshot.contributionMargin ?? 0) >= 0 ? COLORS.secondary : COLORS.error }]}>{fmt(snapshot.contributionMargin)}</Text>
         </View>
         <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: COLORS.outlineVariant, marginTop: 4, paddingTop: 8 }]}>
-          <Text style={[styles.breakdownLabel, { fontWeight: '800' }]}>{t('net_monthly_profit_label') || 'Net Monthly Profit'} ({netMarginPct.toFixed(0)}%)</Text>
-          <Text style={[styles.breakdownValue, { fontWeight: '800', color: monthlyNetProfit >= 0 ? COLORS.secondary : COLORS.error }]}>
-            {fmt(monthlyNetProfit)}
+          <Text style={[styles.breakdownLabel, { fontWeight: '800' }]}>{t('operating_surplus') || 'Operating Surplus'}</Text>
+          <Text style={[styles.breakdownValue, { fontWeight: '800', color: (snapshot.operatingSurplus ?? 0) >= 0 ? COLORS.secondary : COLORS.error }]}>
+            {fmt(snapshot.operatingSurplus)}
           </Text>
         </View>
         <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('breakeven_rev_label') || 'Break-even Revenue / Month'}</Text>
-          <Text style={styles.breakdownValue}>{fmt(breakEvenRevenue)}</Text>
-        </View>
-        <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('safety_margin_label') || 'Safety Margin'} ({safetyMarginPct.toFixed(0)}%)</Text>
-          <Text style={[styles.breakdownValue, { color: safetyMargin >= 0 ? COLORS.secondary : COLORS.error }]}>
-            {fmt(safetyMargin)}
+          <Text style={styles.breakdownLabel}>{t('breakeven_units') || 'Break-even Units'}</Text>
+          <Text style={styles.breakdownValue}>
+            {snapshot.breakEvenStatus === 'VIABLE' ? `${snapshot.breakEvenUnits} units` : fmtStatus(snapshot.breakEvenStatus)}
           </Text>
         </View>
         <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('projected_roi_label') || 'Projected ROI'}</Text>
-          <Text style={styles.breakdownValue}>{roiPct.toFixed(1)}%</Text>
+          <Text style={styles.breakdownLabel}>{t('breakeven_rev_label') || 'Break-even Revenue'}</Text>
+          <Text style={styles.breakdownValue}>{fmt(snapshot.breakEvenRevenue)}</Text>
         </View>
-        <View style={styles.breakdownRow}>
-          <Text style={styles.breakdownLabel}>{t('payback_period_label') || 'Payback Period'}</Text>
-          <Text style={styles.breakdownValue}>{paybackMonths ? `${paybackMonths} ${t('months') || 'months'}` : 'N/A'}</Text>
+      </View>
+
+      {/* Financing — only if margin capital or loan is available */}
+      {(snapshot.candidateEmi != null || snapshot.schemeTerms) && (
+        <View style={[styles.card, { marginTop: 8 }]}>
+          <Text style={styles.cardSectionTitle}>{t('financing_analysis') || 'Financing Analysis'}</Text>
+          {snapshot.schemeTerms && !snapshot.schemeTerms.isOutOfScope && (
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>{t('scheme_type') || 'Scheme'}</Text>
+              <Text style={styles.breakdownValue}>{snapshot.schemeTerms.schemeName} @ {snapshot.schemeTerms.interestRate}%</Text>
+            </View>
+          )}
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>{t('candidate_emi') || 'Candidate EMI'}</Text>
+            <Text style={styles.breakdownValue}>{fmt(snapshot.candidateEmi)}</Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>{t('business_dscr') || 'Business DSCR'}</Text>
+            <Text style={[styles.breakdownValue, { color: (snapshot.businessDscr ?? 0) >= AARTHIKA_CALCULATION_POLICY.minimum_required_dscr ? COLORS.secondary : COLORS.error }]}>
+              {snapshot.businessDscr != null ? snapshot.businessDscr.toFixed(2) : fmt(null)}
+            </Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>{t('max_affordable_emi') || 'Max Affordable EMI'}</Text>
+            <Text style={styles.breakdownValue}>{fmt(snapshot.maximumAffordableEmi)}</Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>{t('affordable_loan') || 'Affordable Loan Amount'}</Text>
+            <Text style={styles.breakdownValue}>{fmt(snapshot.affordableLoanAmount)}</Text>
+          </View>
+          {snapshot.recommendedLoanAmount != null && (
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>{t('recommended_loan') || 'Recommended Loan'}</Text>
+              <Text style={[styles.breakdownValue, { color: COLORS.secondary }]}>{fmt(snapshot.recommendedLoanAmount)}</Text>
+            </View>
+          )}
         </View>
+      )}
+
+      {/* Household Affordability — completely separate */}
+      <View style={[styles.card, { marginTop: 8 }]}>
+        <Text style={styles.cardSectionTitle}>{t('household_affordability') || 'Household Affordability'}</Text>
+        {snapshot.householdAnalysisAvailable ? (
+          <>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>{t('household_debt_ratio') || 'Post-Loan Debt Ratio'}</Text>
+              <Text style={[styles.breakdownValue, { color: (snapshot.householdDebtRatio ?? 0) <= AARTHIKA_CALCULATION_POLICY.maximum_household_debt_ratio ? COLORS.secondary : COLORS.error }]}>
+                {snapshot.householdDebtRatio != null ? `${(snapshot.householdDebtRatio * 100).toFixed(0)}%` : fmt(null)}
+              </Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>{t('household_status') || 'Household Status'}</Text>
+              <Text style={styles.breakdownValue}>{fmtStatus(snapshot.financeResult.household_affordability_status)}</Text>
+            </View>
+          </>
+        ) : (
+          <Text style={{ fontSize: 12, color: COLORS.onSurfaceVariant, fontStyle: 'italic' }}>
+            {t('household_insufficient') || 'Household income/expense data not provided — household analysis not available.'}
+          </Text>
+        )}
+      </View>
+
+      {/* Overall Readiness */}
+      <View style={[styles.bentoCard, { backgroundColor: COLORS.secondaryContainer, marginTop: 8 }]}>
+        <Text style={[styles.bentoLabel, { color: COLORS.secondary }]}>
+          {t('overall_readiness') || 'Overall Readiness'}
+        </Text>
+        <Text style={[styles.bentoValueSecondary, { fontSize: 18 }]}>
+          {fmtStatus(snapshot.overallReadiness)}
+        </Text>
+        <Text style={[styles.bentoSub, { color: COLORS.onSecondaryContainer }]}>
+          {snapshot.businessAnalysisAvailable ? '✅ ' + (t('business_analysis_available') || 'Business analysis available') : '📝 ' + (t('business_analysis_needed') || 'Business data needed')}
+          {'  ·  '}
+          {snapshot.householdAnalysisAvailable ? '✅ ' + (t('household_analysis') || 'Household') : '📝 ' + (t('household_data_needed') || 'Household data needed')}
+        </Text>
       </View>
 
       {/* Plan Breakdown */}
-      <View style={[styles.card, { marginTop: 16 }]}>
-        <Text style={styles.cardSectionTitle}>{t('plan_breakdown_section') || 'Plan Cost Breakdown'}</Text>
-        {breakdown.map((item: any, i: number) => (
-          <View key={i} style={styles.breakdownRow}>
-            <Text style={styles.breakdownLabel}>{item.label}</Text>
-            <Text style={styles.breakdownValue}>{fmt(item.cost || 0)}</Text>
-          </View>
-        ))}
-
-        <View style={[styles.row, { marginTop: 16 }]}>
-          <TouchableOpacity
-            style={[styles.outlineButton, { flex: 1, marginRight: 8 }]}
-            onPress={() => navigateTo('business_details')}
-          >
-            <Text style={styles.outlineButtonText}>{t('edit_details_btn') || 'Edit Details'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.primaryButton, { flex: 1, marginLeft: 8, marginTop: 0 }]}
-            onPress={handleRunRiskTest}
-            disabled={isSubmitting}
-          >
-            <Text style={styles.primaryButtonText}>
-              {isSubmitting ? t('waiting_btn') || 'Wait...' : t('view_risk_btn') || 'View Risk →'}
-            </Text>
-          </TouchableOpacity>
+      {breakdown.length > 0 && (
+        <View style={[styles.card, { marginTop: 8 }]}>
+          <Text style={styles.cardSectionTitle}>{t('plan_breakdown_section') || 'Plan Cost Breakdown'}</Text>
+          {breakdown.map((item: any, i: number) => (
+            <View key={i} style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>{item.label}</Text>
+              <Text style={styles.breakdownValue}>{fmt(item.cost || 0)}</Text>
+            </View>
+          ))}
         </View>
+      )}
+
+      <View style={[styles.row, { marginTop: 16 }]}>
+        <TouchableOpacity
+          style={[styles.outlineButton, { flex: 1, marginRight: 8 }]}
+          onPress={() => navigateTo('business_details')}
+        >
+          <Text style={styles.outlineButtonText}>{t('edit_details_btn') || 'Edit Details'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.primaryButton, { flex: 1, marginLeft: 8, marginTop: 0 }]}
+          onPress={handleRunRiskTest}
+          disabled={isSubmitting}
+        >
+          <Text style={styles.primaryButtonText}>
+            {isSubmitting ? t('waiting_btn') || 'Wait...' : t('view_risk_btn') || 'View Risk →'}
+          </Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
 }
 
 // ----------------------------------------------------
-// RISK TEST SCREEN (FULLY LOCALIZED WITH TTS VERDICT)
+// RISK TEST SCREEN — Uses canonical analytics snapshot.
+// NO fake fallback reports. Backend failure → local deterministic report.
 // ----------------------------------------------------
 function RiskTestScreen() {
   const { activeBusinessId, setActiveBusinessId, activeBusiness, aiReport, setAiReport, currentLang, t } = useApp();
-  const [loading, setLoading] = useState(!aiReport);
-  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [reportStatus, setReportStatus] = useState<string>('LOADING');
+
+  // Build canonical plan inputs
+  const planInputs: BusinessPlanInputs = {
+    businessCategory: activeBusiness?.sector || undefined,
+    businessTitle: activeBusiness?.title || undefined,
+    setupCost: activeBusiness?.setupCost || undefined,
+    availableMarginCapital: activeBusiness?.availableMarginCapital ?? undefined,
+    monthlyUnitsSold: activeBusiness?.salesPerMonth || undefined,
+    sellingPricePerUnit: activeBusiness?.pricePerUnit || undefined,
+    variableCostPerUnit: activeBusiness?.costPerUnit || undefined,
+    monthlyBusinessFixedCost: activeBusiness?.monthlyFixed || undefined,
+    householdEssentialExpenses: activeBusiness?.personalCost || undefined,
+    householdNonBusinessIncome: activeBusiness?.householdIncome ?? undefined,
+    existingHouseholdEMI: activeBusiness?.existingEMI ?? undefined,
+    requestedLoanAmount: activeBusiness?.requestedLoanAmount ?? undefined,
+  };
 
   const handleHearSummary = () => {
-    const d = (dashboardData || dashboardView)?.recommendation;
+    const d = dashboardData?.recommendation;
     if (!d) return;
-    const summary = `${d.decision || ''}. ${d.rationale || 'Analysis complete.'} ` +
-      `Confidence ${Math.round((aiReport?.confidence || 0.85) * 100)} percent.`;
+    const summary = `${d.decision || ''}. ${d.rationale || 'Analysis complete.'}`;
     speak(summary, currentLang);
   };
 
   const isGeneratingRef = useRef(false);
 
-
-
-
-
   const generateReport = async () => {
+    if (isGeneratingRef.current) return;
     isGeneratingRef.current = true;
     setLoading(true);
+    setReportStatus('LOADING');
+
     try {
-      let bizId = activeBusinessId;
-      if (!bizId) {
-        try {
-          const businessData = {
-            user_id: 'user_123',
-            business_name: activeBusiness?.title || 'Organic Vegetable Farming',
-            business_category: activeBusiness?.sector || 'farming',
-            description: JSON.stringify(activeBusiness || {}),
-            status: 'DRAFT',
-          };
-          const created = await api.business.createBusiness(businessData);
-          if (created?.id) {
-            bizId = created.id;
-            try {
-              await api.business.createAssumption(created.id, buildAssumptionsPayload(activeBusiness || {}, created.id));
-            } catch (e) {
-              // ignore
+      // Generate local deterministic snapshot FIRST (always available)
+      const snapshot = generateAnalyticsSnapshot(planInputs);
+      const localDashboard = snapshotToDashboardData(snapshot);
+
+      // Try backend AI report for enhanced explanations
+      let backendReport = null;
+      if (isBackendConfigured) {
+        let bizId = activeBusinessId;
+        if (!bizId) {
+          try {
+            const businessData = {
+              user_id: 'user_123',
+              business_name: activeBusiness?.title || 'Business Plan',
+              business_category: activeBusiness?.sector || 'custom',
+              description: JSON.stringify(activeBusiness || {}),
+              status: 'DRAFT',
+            };
+            const created = await api.business.createBusiness(businessData);
+            if (created?.id) {
+              bizId = created.id;
+              setActiveBusinessId(bizId);
+              try {
+                await api.business.createAssumption(created.id, buildAssumptionsPayload(activeBusiness || {}, created.id));
+              } catch (_e) { /* ignore */ }
             }
+          } catch (createErr) {
+            console.warn('Auto-create failed:', (createErr as Error).message);
           }
-        } catch (createErr) {
-          console.warn('Auto-create failed:', (createErr as Error).message);
+        }
+
+        if (bizId) {
+          try {
+            backendReport = await api.aiReports.generateReport(bizId);
+            setAiReport(backendReport);
+          } catch (apiErr) {
+            console.warn('Backend AI report unavailable, using local deterministic:', (apiErr as Error).message);
+          }
         }
       }
 
-      let report = null;
-      if (bizId) {
-        try {
-          report = await api.aiReports.generateReport(bizId);
-          setAiReport(report);
-          if (typeof setActiveBusinessId === 'function') {
-            setActiveBusinessId(bizId);
-          }
-        } catch (apiErr) {
-          console.warn('API error, falling back to local analysis model:', (apiErr as Error).message);
-        }
+      // Merge backend explanation into local dashboard if available
+      if (backendReport) {
+        localDashboard.recommendation.rationale = backendReport.summary || localDashboard.recommendation.rationale;
+        localDashboard.recommendation.supportingPoints = [
+          backendReport.deterministic_findings_explained || '',
+          ...(backendReport.caveats || []),
+        ].filter(Boolean);
+        localDashboard.recommendation.actionItems = backendReport.suggested_next_steps || localDashboard.recommendation.actionItems;
+        setReportStatus('READY');
+      } else {
+        setReportStatus(isBackendConfigured ? 'PARTIAL_OFFLINE' : 'PARTIAL_OFFLINE');
       }
 
-      if (!report) {
-        report = {
-          decision: 'GO',
-          rationale: 'Validated rural model with strong local demand and robust cash flow safety margin.',
-          confidence: 0.88,
-          market_analysis: {
-            demand_level: 'HIGH',
-            swot_strengths: ['High gross margin (55%)', 'Consistent local daily demand', 'Low initial fixed overhead'],
-            swot_weaknesses: ['Seasonal price variations', 'Perishable inventory without cold storage'],
-            swot_opportunities: ['Direct supply to weekly village haats and local retail stores', 'Government scheme subsidies'],
-            swot_threats: ['Climatic fluctuation', 'Local competitor entry'],
-          },
-          risk_assessment: {
-            overall_risk: 0.28,
-            market_risk: 0.25,
-            operational_risk: 0.3,
-            top_risks: ['Input cost inflation', 'Seasonal demand drop'],
-            mitigation_strategies: ['Pre-book supplies at wholesale rate', 'Diversify product offerings'],
-          },
-          next_steps: ['Validate local supplier credit terms', 'Finalize sales points and initial stock', 'Begin Phase 1 pilot setup'],
-        };
-      }
-
-      const dashboardFormat = transformReportToDashboard(report, activeBusiness);
-      setDashboardData(dashboardFormat);
+      setDashboardData(localDashboard);
     } catch (e) {
-      console.error(e);
+      console.error('[RiskTestScreen] Report generation error:', e);
+      // Even on error, produce a local deterministic report
+      try {
+        const snapshot = generateAnalyticsSnapshot(planInputs);
+        setDashboardData(snapshotToDashboardData(snapshot));
+        setReportStatus('PARTIAL_OFFLINE');
+      } catch (localErr) {
+        console.error('[RiskTestScreen] Local analytics also failed:', localErr);
+        setReportStatus('ERROR');
+      }
     } finally {
       setLoading(false);
       isGeneratingRef.current = false;
@@ -1281,216 +1478,51 @@ function RiskTestScreen() {
   };
 
   useEffect(() => {
-    if (aiReport && aiReport.business_id === activeBusinessId) return;
-    if (isGeneratingRef.current) return;
     generateReport();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeBusinessId]);
-
-  function transformReportToDashboard(report: any, business: any): any {
-    const setupCost = business?.setupCost || 0;
-    const monthlyFixed = business?.monthlyFixed || 0;
-    const pricePerUnit = business?.pricePerUnit || 0;
-    const costPerUnit = business?.costPerUnit || 0;
-    const salesPerMonth = business?.salesPerMonth || 0;
-    const personalCost = business?.personalCost || 0;
-
-    // Use Canonical Engine
-    const inputs = {
-      requested_loan_amount: setupCost * 0.5,
-      maximum_scheme_loan_amount: 99999999,
-      annual_interest_rate_percent: 12,
-      repayment_tenure_months: 24,
-      moratorium_months: 0,
-      monthly_units_sold: salesPerMonth,
-      selling_price_per_unit: pricePerUnit,
-      variable_cost_per_unit: costPerUnit,
-      monthly_fixed_cost: monthlyFixed,
-      monthly_household_nonbusiness_income: 0,
-      monthly_household_essential_expenses: personalCost,
-      existing_monthly_household_debt_payments: 0
-    };
-    
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { calculateFinancialAssessment } = require('../../engine/financeCalculator');
-    const result = calculateFinancialAssessment(inputs, { minimum_business_dscr: 1.2, maximum_household_debt_ratio: 0.5 });
-
-    const monthlyRevenue = result.monthly_revenue || 0;
-    const monthlyVariableCost = result.monthly_variable_cost || 0;
-    const monthlyNetProfit = result.business_cash_available_for_debt_service || 0;
-    const breakEvenRevenue = result.break_even_units ? result.break_even_units * pricePerUnit : 0;
-    const safetyMargin = monthlyRevenue - breakEvenRevenue;
-    const safetyMarginPct = monthlyRevenue > 0 ? (safetyMargin / monthlyRevenue) * 100 : 45;
-    const loanAmount = setupCost * 0.5;
-    const loanEMI = result.emi || 0;
-
-    const decisionMap: any = {
-      GO: 'GO',
-      MODIFY: 'CAUTION',
-      DO_NOT_INVEST_YET: 'NO-GO',
-    };
-
-    const risks = [
-      {
-        risk: 'Market Demand Fluctuation',
-        category: 'Market',
-        probability: 0.35,
-        impact: 'Medium',
-        severity: 'Medium',
-        financialExposure: Math.floor(monthlyRevenue * 0.12),
-        mitigation: 'Establish weekly forward contracts with local vendors',
-      },
-      {
-        risk: 'Raw Material Cost Surge',
-        category: 'Operational',
-        probability: 0.3,
-        impact: 'Medium',
-        severity: 'Medium',
-        financialExposure: Math.floor(monthlyRevenue * 0.1),
-        mitigation: 'Bulk procurement and buffer inventory stocking',
-      },
-      {
-        risk: 'Climate / Weather Disruption',
-        category: 'Environmental',
-        probability: 0.25,
-        impact: 'Low',
-        severity: 'Low',
-        financialExposure: Math.floor(monthlyRevenue * 0.08),
-        mitigation: 'Implement drip irrigation and sheltered sheds',
-      },
-    ];
-
-    const swot = {
-      strengths: (report.market_analysis?.swot_strengths || []).map((s: string) => ({
-        finding: s,
-        whyItMatters: 'Provides sustainable competitive moat and immediate positive unit economics',
-        impact: 'High',
-      })),
-      weaknesses: (report.market_analysis?.swot_weaknesses || []).map((w: string) => ({
-        finding: w,
-        whyItMatters: 'Requires careful working capital management',
-        impact: 'Medium',
-      })),
-      opportunities: (report.market_analysis?.swot_opportunities || []).map((o: string) => ({
-        finding: o,
-        whyItMatters: 'Opens avenues for scaling revenue beyond village baseline',
-        impact: 'High',
-      })),
-      threats: (report.market_analysis?.swot_threats || []).map((t: string) => ({
-        finding: t,
-        whyItMatters: 'External macroeconomic risks to monitor continuously',
-        impact: 'Low',
-      })),
-    };
-
-    const scenarios = [
-      {
-        name: 'Baseline',
-        revenueChange: 0,
-        costChange: 0,
-        monthlyRevenue: monthlyRevenue,
-        monthlyExpenses: monthlyVariableCost + monthlyFixed,
-        loanEMI: loanEMI,
-        netCashFlow: monthlyNetProfit,
-      },
-      {
-        name: 'Mild Stress (-10% rev, +10% cost)',
-        revenueChange: -10,
-        costChange: 10,
-        monthlyRevenue: monthlyRevenue * 0.9,
-        monthlyExpenses: (monthlyVariableCost + monthlyFixed) * 1.1,
-        loanEMI: loanEMI,
-        netCashFlow: monthlyRevenue * 0.9 - (monthlyVariableCost + monthlyFixed) * 1.1 - loanEMI,
-      },
-      {
-        name: 'Moderate Stress (-20% rev, +20% cost)',
-        revenueChange: -20,
-        costChange: 20,
-        monthlyRevenue: monthlyRevenue * 0.8,
-        monthlyExpenses: (monthlyVariableCost + monthlyFixed) * 1.2,
-        loanEMI: loanEMI,
-        netCashFlow: monthlyRevenue * 0.8 - (monthlyVariableCost + monthlyFixed) * 1.2 - loanEMI,
-      },
-    ];
-
-    return {
-      overallRiskScore: 0.28,
-      businessViabilityScore: 0.88,
-      financialResilience: Math.min(0.9, Math.max(0.1, monthlyNetProfit / monthlyRevenue || 0.25)),
-      marketRisk: 0.25,
-      operationalRisk: 0.3,
-      swot,
-      risks,
-      financials: {
-        monthlyRevenue,
-        monthlyExpenses: monthlyVariableCost + monthlyFixed,
-        loanEMI,
-        netCashFlow: monthlyNetProfit,
-        breakEvenRevenue,
-        safetyMargin,
-      },
-      baseInputs: {
-        pricePerUnit,
-        costPerUnit,
-        salesPerMonth,
-        monthlyFixed,
-        personalCost,
-        setupCost,
-        loanAmount,
-        interestRatePercent: 12,
-        loanTenureMonths: 24,
-      },
-      scenarios,
-      recommendation: {
-        decision: 'REVIEW',
-        rationale: report.summary || 'Analysis complete',
-        supportingPoints: [
-          report.deterministic_findings_explained || 'Findings explained.',
-          ...(report.caveats || []),
-        ],
-        actionItems: report.suggested_next_steps || ['Finalize vendor list', 'Review working capital buffer', 'Initiate Phase 1 setup'],
-      },
-    };
-  };
-
-  const dashboardView =
-    dashboardData ||
-    (aiReport && aiReport.business_id === activeBusinessId
-      ? transformReportToDashboard(aiReport, activeBusiness)
-      : null);
 
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <View style={styles.centerSection}>
         <Text style={styles.screenHeaderTitle}>{t('reality_check_title') || 'Reality Check & Risk'}</Text>
-        <Text style={styles.screenHeaderSub}>{t('ai_analysis_sub') || 'Multi-Agent AI Analysis'}</Text>
+        <Text style={styles.screenHeaderSub}>
+          {reportStatus === 'PARTIAL_OFFLINE'
+            ? t('local_analysis_sub') || 'Deterministic Local Analysis'
+            : t('ai_analysis_sub') || 'Business Analytics'}
+        </Text>
       </View>
 
-      {!loading && dashboardView && (
+      {!loading && dashboardData && (
         <TouchableOpacity
           style={[styles.demoButton, { marginHorizontal: 20, marginBottom: 12 }]}
           onPress={handleHearSummary}
           activeOpacity={0.8}
         >
           <Text style={[styles.demoButtonText, { color: COLORS.secondary }]}>
-            {t('hear_ai_verdict') || '🔊 Hear the AI Verdict'}
+            {t('hear_ai_verdict') || '🔊 Hear Summary'}
           </Text>
         </TouchableOpacity>
       )}
 
-      {loading && !dashboardView ? (
-        <View style={[styles.card, { padding: 30, alignItems: 'center' }]}>
-          <Text style={{ fontSize: 40, marginBottom: 10 }}>🤖</Text>
-          <Text style={{ fontSize: 16, fontWeight: 'bold', color: COLORS.primary, textAlign: 'center' }}>
-            {t('ai_analyzing_title') || 'Aarthika AI is analyzing your business...'}
-          </Text>
-          <Text style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginTop: 10, textAlign: 'center' }}>
-            {t('ai_analyzing_sub') || '(Context Retrieval → Market Analyst → Risk Actuary → Final Decision)'}
+      {reportStatus === 'ERROR' && (
+        <View style={[styles.card, { padding: 16, alignItems: 'center' }]}>
+          <Text style={{ fontSize: 14, color: COLORS.error, textAlign: 'center' }}>
+            {t('analysis_error') || 'Financial analysis could not be completed. Please try again.'}
           </Text>
         </View>
-      ) : (
-        <RiskAnalysisDashboard riskData={dashboardView} />
       )}
+
+      {loading && !dashboardData ? (
+        <View style={[styles.card, { padding: 30, alignItems: 'center' }]}>
+          <Text style={{ fontSize: 40, marginBottom: 10 }}>📊</Text>
+          <Text style={{ fontSize: 16, fontWeight: 'bold', color: COLORS.primary, textAlign: 'center' }}>
+            {t('analyzing_title') || 'Analyzing your business plan...'}
+          </Text>
+        </View>
+      ) : dashboardData ? (
+        <RiskAnalysisDashboard riskData={dashboardData} />
+      ) : null}
     </ScrollView>
   );
 }
@@ -1499,7 +1531,7 @@ function RiskTestScreen() {
 // PROFILE SCREEN (FULLY LOCALIZED)
 // ----------------------------------------------------
 function ProfileScreen() {
-  const { user, handleLogout, setIsLangModalOpen, currentLang, t } = useApp();
+  const { user, handleLogout, setIsLangModalOpen, currentLang, t, navigateTo } = useApp();
 
   const langNames: Record<string, string> = {
     en: 'English',
@@ -1520,10 +1552,10 @@ function ProfileScreen() {
         <View style={styles.profileAvatarCircle}>
           <Text style={{ fontSize: 36 }}>👤</Text>
         </View>
-        <Text style={styles.profileName}>{user.fullName || 'Ramesh Kumar'}</Text>
+        <Text style={styles.profileName}>{user.fullName || t('not_provided') || 'Not provided'}</Text>
         <View style={styles.profileLocationBadge}>
           <Text style={styles.profileLocationText}>
-            📍 {user.village ? `${user.village}, ` : ''}{user.district || 'Raigarh'}, {user.state || 'Chhattisgarh'}
+            📍 {user.village ? `${user.village}, ` : ''}{user.district || t('not_provided') || 'Not provided'}{user.state ? `, ${user.state}` : ''}
           </Text>
         </View>
       </View>
@@ -1534,28 +1566,28 @@ function ProfileScreen() {
         
         <View style={styles.profileInfoItem}>
           <Text style={styles.profileInfoLabel}>{t('mobile_number') || 'Mobile Number'}</Text>
-          <Text style={styles.profileInfoValue}>{user.mobile || '9876543210'}</Text>
+          <Text style={styles.profileInfoValue}>{user.mobile || t('not_provided') || 'Not provided'}</Text>
         </View>
 
         <View style={styles.profileInfoItem}>
           <Text style={styles.profileInfoLabel}>{t('age_dob') || 'Age'}</Text>
-          <Text style={styles.profileInfoValue}>{user.age ? `${user.age} years` : '28 years'}</Text>
+          <Text style={styles.profileInfoValue}>{user.age ? `${user.age} years` : t('not_provided') || 'Not provided'}</Text>
         </View>
 
         <View style={styles.profileInfoItem}>
           <Text style={styles.profileInfoLabel}>{t('current_occupation') || 'Occupation'}</Text>
-          <Text style={styles.profileInfoValue}>{user.occupation || 'Farmer'}</Text>
+          <Text style={styles.profileInfoValue}>{user.occupation || t('not_provided') || 'Not provided'}</Text>
         </View>
 
         <View style={styles.profileInfoItem}>
           <Text style={styles.profileInfoLabel}>{t('interested_business') || 'Interested Business'}</Text>
-          <Text style={styles.profileInfoValue}>{user.interestedSector || 'Farming'}</Text>
+          <Text style={styles.profileInfoValue}>{user.interestedSector || t('not_provided') || 'Not provided'}</Text>
         </View>
 
         <View style={[styles.profileInfoItem, { borderBottomWidth: 0 }]}>
           <Text style={styles.profileInfoLabel}>{t('village_town') || 'Village / Town'}</Text>
           <Text style={styles.profileInfoValue}>
-            {user.village || 'Dharamjaigarh'} ({user.district || 'Raigarh'})
+            {user.village || t('not_provided') || 'Not provided'}{user.district ? ` (${user.district})` : ''}
           </Text>
         </View>
       </View>
@@ -1580,12 +1612,722 @@ function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
+      <TouchableOpacity
+        style={[styles.outlineButton, { marginTop: 12, borderColor: COLORS.secondary }]}
+        onPress={() => {
+          stopSpeaking();
+          navigateTo('touchless_auth');
+        }}
+        activeOpacity={0.8}
+      >
+        <Text style={[styles.outlineButtonText, { color: COLORS.secondary }]}>
+          🎙️ {t('update_voice_profile') || 'Update Voice Profile / Re-speak'}
+        </Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
         <Text style={styles.logoutButtonText}>{t('log_out') || 'Log Out'}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
+
+// ----------------------------------------------------
+// TOUCHLESS VOICE ONBOARDING & LOGIN SCREEN
+// Collects: 1. Name, 2. Place, 3. Occupation, 4. Age
+// Touchless speech guidance via TTS and hands-free STT listening
+// Accessible tactile fallback for typing, editing, and instant restore
+// ----------------------------------------------------
+function TouchlessAuthScreen() {
+  const { currentLang, saveTouchlessProfile, navigateTo, t, setIsLangModalOpen } = useApp();
+
+  const [step, setStep] = useState(0); // 0: Name, 1: Place, 2: Occupation, 3: Age, 4: Ready
+  const [name, setName] = useState('');
+  const [place, setPlace] = useState('');
+  const [occupation, setOccupation] = useState('');
+  const [age, setAge] = useState('');
+
+  const [isListening, setIsListening] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [storedProfile, setStoredProfile] = useState<any>(null);
+
+  // Animated pulse for mic
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+  const waveAnim1 = useRef(new Animated.Value(6)).current;
+  const waveAnim2 = useRef(new Animated.Value(14)).current;
+  const waveAnim3 = useRef(new Animated.Value(10)).current;
+  const waveAnim4 = useRef(new Animated.Value(18)).current;
+
+  // Refs for speech timers
+  const speechTimerRef = useRef<any>(null);
+  const finishTimerRef = useRef<any>(null);
+
+  // Check for previous profile in AsyncStorage on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem('@touchless_profile');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && (parsed.name || parsed.fullName)) {
+            setStoredProfile(parsed);
+          }
+        } else {
+          const userRaw = await AsyncStorage.getItem('@user');
+          if (userRaw) {
+            const parsedUser = JSON.parse(userRaw);
+            if (parsedUser && (parsedUser.fullName || parsedUser.firstName)) {
+              setStoredProfile({
+                name: parsedUser.fullName || parsedUser.firstName,
+                place: parsedUser.village || parsedUser.district || '',
+                occupation: parsedUser.occupation || '',
+                age: parsedUser.age || '',
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load stored profile', e);
+      }
+    })();
+  }, []);
+
+  // Pulsing animation loop
+  useEffect(() => {
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulseLoop.start();
+
+    // Wave animation loop
+    const waveLoop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(waveAnim1, { toValue: 18, duration: 350, useNativeDriver: false }),
+          Animated.timing(waveAnim2, { toValue: 8, duration: 400, useNativeDriver: false }),
+          Animated.timing(waveAnim3, { toValue: 22, duration: 320, useNativeDriver: false }),
+          Animated.timing(waveAnim4, { toValue: 10, duration: 450, useNativeDriver: false }),
+        ]),
+        Animated.parallel([
+          Animated.timing(waveAnim1, { toValue: 8, duration: 400, useNativeDriver: false }),
+          Animated.timing(waveAnim2, { toValue: 20, duration: 320, useNativeDriver: false }),
+          Animated.timing(waveAnim3, { toValue: 6, duration: 380, useNativeDriver: false }),
+          Animated.timing(waveAnim4, { toValue: 16, duration: 350, useNativeDriver: false }),
+        ]),
+      ])
+    );
+    waveLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+      waveLoop.stop();
+    };
+  }, [pulseAnim, waveAnim1, waveAnim2, waveAnim3, waveAnim4]);
+
+  // Questions configuration
+  const questions = [
+    {
+      key: 'name',
+      stepNum: 1,
+      icon: '👤',
+      title: currentLang === 'hi' ? 'आपका नाम क्या है?' : (t('auth_name_title') || 'What is your name?'),
+      prompt: currentLang === 'hi' ? 'बोलकर अपना पूरा नाम बताएं' : (t('auth_name_prompt') || 'Speak your full name'),
+      spoken: currentLang === 'hi'
+        ? 'नमस्ते! आर्थिक में आपका स्वागत है। आपका शुभ नाम क्या है?'
+        : (currentLang === 'bn'
+            ? 'নমস্কার! আর্থিকা-তে আপনাকে স্বাগতম। আপনার নাম কি?'
+            : 'Welcome to Aarthika! What is your name?'),
+      placeholder: currentLang === 'hi' ? 'जैसे: रामेश्वर पाटिल / सुनीता देवी' : 'e.g. Rameshwar Patil / Sunita Devi',
+      value: name,
+      setValue: setName,
+    },
+    {
+      key: 'place',
+      stepNum: 2,
+      icon: '📍',
+      title: currentLang === 'hi' ? 'आप कहाँ से हैं?' : (t('auth_place_title') || 'Where are you from?'),
+      prompt: currentLang === 'hi' ? 'गाँव, कस्बे या शहर का नाम बोलें' : (t('auth_place_prompt') || 'Speak your village, town, or city'),
+      spoken: currentLang === 'hi'
+        ? 'बहुत अच्छा! आप किस गाँव या शहर से हैं?'
+        : (currentLang === 'bn'
+            ? 'খুব ভালো! আপনি কোন গ্রাম বা শহরের বাসিন্দা?'
+            : 'Nice to meet you! What is your village, town, or city?'),
+      placeholder: currentLang === 'hi' ? 'जैसे: बारामती, पुणे / वाराणसी' : 'e.g. Baramati, Pune / Varanasi',
+      value: place,
+      setValue: setPlace,
+    },
+    {
+      key: 'occupation',
+      stepNum: 3,
+      icon: '💼',
+      title: currentLang === 'hi' ? 'आप क्या काम करते हैं?' : (t('auth_occ_title') || 'What is your occupation?'),
+      prompt: currentLang === 'hi' ? 'अपना व्यवसाय या कार्य बोलकर बताएं' : (t('auth_occ_prompt') || 'Speak your current work, trade, or business'),
+      spoken: currentLang === 'hi'
+        ? 'शानदार! आप क्या व्यवसाय या काम करते हैं?'
+        : (currentLang === 'bn'
+            ? 'চমৎকার! আপনি কি কাজ বা ব্যবসা করেন?'
+            : 'What is your current work, trade, or occupation?'),
+      placeholder: currentLang === 'hi' ? 'जैसे: दूध डेयरी, सिलाई, किराना दुकान, खेती' : 'e.g. Dairy Farming, Tailoring, Kirana Store, Farming',
+      value: occupation,
+      setValue: setOccupation,
+    },
+    {
+      key: 'age',
+      stepNum: 4,
+      icon: '🎂',
+      title: currentLang === 'hi' ? 'आपकी उम्र कितनी है?' : (t('auth_age_title') || 'What is your age?'),
+      prompt: currentLang === 'hi' ? 'अपनी उम्र वर्षों में बोलें' : (t('auth_age_prompt') || 'Speak your age in years'),
+      spoken: currentLang === 'hi'
+        ? 'और आपकी उम्र कितने वर्ष है?'
+        : (currentLang === 'bn'
+            ? 'এবং আপনার বয়স কত বছর?'
+            : 'And how old are you?'),
+      placeholder: currentLang === 'hi' ? 'जैसे: 32 वर्ष' : 'e.g. 32',
+      value: age,
+      setValue: setAge,
+    },
+  ];
+
+  // Helper to clean voice transcripts of speech fillers
+  const cleanSpokenInput = (stepIndex: number, raw: string): string => {
+    let text = raw.trim();
+    if (!text) return '';
+
+    if (stepIndex === 0) {
+      // Name cleaning
+      text = text.replace(/^(मेरा नाम|my name is|i am|iam|mera nam|humara naam|humara nam|naam hai|nam hai|naam|nam)\s+/i, '');
+      text = text.replace(/\s+(hai|hoon|hu|jee|ji|sir|madam)$/i, '');
+      // Capitalize first letters of words
+      return text.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+    } else if (stepIndex === 1) {
+      // Place cleaning
+      text = text.replace(/^(मैं|hum|main|i live in|from|i am from|rehta hoon|rehti hoon|gaav|gaon|shahar|city|village|district)\s+/i, '');
+      text = text.replace(/\s+(se hoon|se hu|mein rehta hoon|me rehte hai|se|mein|me)$/i, '');
+      return text.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+    } else if (stepIndex === 2) {
+      // Occupation cleaning
+      text = text.replace(/^(मैं|hum|main|mera kaam|mera vyapar|my work is|my job is|i do|i work as)\s+/i, '');
+      text = text.replace(/\s+(ka kaam|karta hoon|karti hoon|ka vyapar|ka business|hai|kare)$/i, '');
+      return text.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+    } else if (stepIndex === 3) {
+      // Age cleaning using numberParser
+      const parsed = parseSpokenNumber(text);
+      if (parsed.success && parsed.value > 0) {
+        return Math.min(100, Math.max(14, Math.round(parsed.value))).toString();
+      }
+      const digits = text.match(/\d{1,3}/);
+      if (digits) {
+        return digits[0];
+      }
+      return text;
+    }
+    return text;
+  };
+
+  // Start speech recognition for current step
+  const startListening = useCallback(() => {
+    stopSpeaking();
+    setError('');
+    setLiveTranscript('');
+    try {
+      sttService.startListening({
+        lang: currentLang,
+        continuous: false,
+        interimResults: true,
+        onStart: () => {
+          setIsListening(true);
+        },
+        onResult: (transcript: string, isFinal: boolean) => {
+          setLiveTranscript(transcript);
+          if (isFinal && transcript.trim().length > 0) {
+            handleSpeechReceived(transcript.trim());
+          }
+        },
+        onError: (_err) => {
+          setIsListening(false);
+        },
+        onEnd: () => {
+          setIsListening(false);
+        },
+      });
+    } catch (e) {
+      setIsListening(false);
+      console.warn('STT start failed:', e);
+    }
+  }, [currentLang, step]);
+
+  // Stop listening
+  const stopListening = useCallback(() => {
+    try {
+      sttService.stopListening();
+    } catch (_e) {
+      // ignore
+    }
+    setIsListening(false);
+  }, []);
+
+  // Play question audio prompt and then auto-listen touchlessly
+  const playPromptAndListen = useCallback((stepIdx: number) => {
+    if (stepIdx > 3) return;
+    clearTimeout(speechTimerRef.current);
+    stopListening();
+
+    const q = questions[stepIdx];
+    if (!q) return;
+
+    // Speak prompt aloud
+    speak(q.spoken, currentLang, 0.95);
+
+    // Wait for speech to complete (~1.5s), then automatically listen
+    speechTimerRef.current = setTimeout(() => {
+      startListening();
+    }, 1500);
+  }, [currentLang, questions, startListening, stopListening]);
+
+  // Trigger prompt when step changes
+  useEffect(() => {
+    if (step <= 3) {
+      playPromptAndListen(step);
+    }
+    return () => {
+      clearTimeout(speechTimerRef.current);
+      stopSpeaking();
+      stopListening();
+    };
+  }, [step]);
+
+  // Process received speech result
+  const handleSpeechReceived = (rawText: string) => {
+    const cleaned = cleanSpokenInput(step, rawText);
+    if (!cleaned) return;
+
+    stopListening();
+
+    if (step === 0) {
+      setName(cleaned);
+      const ack = currentLang === 'hi' ? `नमस्ते ${cleaned} जी!` : `Hello ${cleaned}!`;
+      speak(ack, currentLang);
+      setTimeout(() => setStep(1), 1200);
+    } else if (step === 1) {
+      setPlace(cleaned);
+      const ack = currentLang === 'hi' ? `${cleaned}, बहुत बढ़िया!` : `Great, from ${cleaned}!`;
+      speak(ack, currentLang);
+      setTimeout(() => setStep(2), 1200);
+    } else if (step === 2) {
+      setOccupation(cleaned);
+      const ack = currentLang === 'hi' ? 'शानदार कार्य!' : 'Great occupation!';
+      speak(ack, currentLang);
+      setTimeout(() => setStep(3), 1200);
+    } else if (step === 3) {
+      setAge(cleaned);
+      const ack = currentLang === 'hi' ? 'धन्यवाद! आपकी प्रोफ़ाइल तैयार है।' : 'Thank you! Your profile is ready.';
+      speak(ack, currentLang);
+      setTimeout(() => setStep(4), 1200);
+    }
+  };
+
+  // Manual Next Button click
+  const handleNextStep = () => {
+    stopListening();
+    stopSpeaking();
+    setError('');
+
+    const currentVal = questions[step]?.value?.trim() || '';
+    if (!currentVal) {
+      setError(currentLang === 'hi' ? 'कृपया जानकारी बोलें या लिखें' : 'Please speak or enter an answer');
+      return;
+    }
+
+    if (step === 0) {
+      setStep(1);
+    } else if (step === 1) {
+      setStep(2);
+    } else if (step === 2) {
+      setStep(3);
+    } else if (step === 3) {
+      setStep(4);
+    }
+  };
+
+  // Complete onboarding on Step 4
+  useEffect(() => {
+    if (step === 4) {
+      stopListening();
+      const finalName = name || 'Friend';
+      const welcomePhrase = currentLang === 'hi'
+        ? `स्वागत है ${finalName} जी! आपका आर्थिक खाता तैयार है।`
+        : `Welcome ${finalName}! Your Aarthika profile is ready.`;
+      speak(welcomePhrase, currentLang);
+
+      // Auto-save and navigate after 2 seconds
+      finishTimerRef.current = setTimeout(() => {
+        handleFinalSubmit();
+      }, 2000);
+    }
+    return () => {
+      clearTimeout(finishTimerRef.current);
+    };
+  }, [step]);
+
+  const handleFinalSubmit = async () => {
+    clearTimeout(finishTimerRef.current);
+    setIsSaving(true);
+    try {
+      await saveTouchlessProfile({
+        name: name || 'Entrepreneur',
+        place: place || 'Local',
+        occupation: occupation || 'Small Business',
+        age: age || '30',
+      });
+    } catch (e) {
+      console.warn('Failed to save profile', e);
+      setIsSaving(false);
+    }
+  };
+
+  // Quick restore previous profile
+  const handleQuickRestore = async (prof: any) => {
+    stopSpeaking();
+    stopListening();
+    setIsSaving(true);
+    await saveTouchlessProfile({
+      name: prof.name || prof.fullName || 'Entrepreneur',
+      place: prof.place || prof.village || prof.district || 'Local',
+      occupation: prof.occupation || 'Small Business',
+      age: prof.age || '30',
+    });
+  };
+
+  const currentQ = questions[step];
+
+  return (
+    <ScrollView
+      contentContainerStyle={[styles.scrollContent, { minHeight: '100%', justifyContent: 'center' }]}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Header */}
+      <View style={styles.touchlessHeader}>
+        <View style={styles.touchlessBadge}>
+          <View style={styles.touchlessBadgeDot} />
+          <Text style={styles.touchlessBadgeText}>
+            {currentLang === 'hi' ? 'स्पर्श-मुक्त आवाज़ ऑनबोर्डिंग' : '🎙️ Touchless Voice Onboarding'}
+          </Text>
+        </View>
+        <Text style={styles.touchlessTitle}>
+          {currentLang === 'hi' ? 'बोलकर खाता बनाएं' : 'Speak to Get Started'}
+        </Text>
+        <Text style={styles.touchlessSubtitle}>
+          {currentLang === 'hi'
+            ? 'बस स्वाभाविक आवाज़ में जवाब दें — टाइप करने की ज़रूरत नहीं'
+            : 'Just speak naturally — no passwords or complicated typing needed'}
+        </Text>
+      </View>
+
+      {/* Quick Restore Pill for Previous User */}
+      {storedProfile && step === 0 && (
+        <TouchableOpacity
+          style={styles.touchlessStoredCard}
+          onPress={() => handleQuickRestore(storedProfile)}
+          activeOpacity={0.85}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.secondary }}>
+              {currentLang === 'hi' ? 'पिछला सहेजा हुआ प्रोफ़ाइल' : 'PREVIOUS SAVED PROFILE'}
+            </Text>
+            <Text style={{ fontSize: 15, fontWeight: '800', color: COLORS.onSurface, marginTop: 2 }}>
+              👤 {storedProfile.name}
+              {storedProfile.place ? ` (${storedProfile.place})` : ''}
+            </Text>
+            {storedProfile.occupation ? (
+              <Text style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginTop: 1 }}>
+                💼 {storedProfile.occupation}
+              </Text>
+            ) : null}
+          </View>
+          <View style={{ backgroundColor: COLORS.secondary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }}>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>
+              {currentLang === 'hi' ? 'जारी रखें ➔' : 'Continue ➔'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Progress Dots (1. Name • 2. Place • 3. Occupation • 4. Age) */}
+      <View style={styles.touchlessProgressRow}>
+        {[0, 1, 2, 3].map((idx) => {
+          const isDone = step > idx;
+          const isActive = step === idx;
+          return (
+            <React.Fragment key={idx}>
+              <View
+                style={[
+                  styles.touchlessStepDot,
+                  isDone && styles.touchlessStepDotDone,
+                  isActive && styles.touchlessStepDotActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.touchlessStepDotText,
+                    (isDone || isActive) && styles.touchlessStepDotTextActive,
+                  ]}
+                >
+                  {isDone ? '✓' : idx + 1}
+                </Text>
+              </View>
+              {idx < 3 && (
+                <View
+                  style={[
+                    styles.touchlessProgressLine,
+                    step > idx && styles.touchlessProgressLineDone,
+                  ]}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </View>
+
+      {/* Main Interactive Screen Content */}
+      {step < 4 ? (
+        <View style={styles.touchlessMicCard}>
+          {/* Question Title & Subtext */}
+          <View style={{ alignItems: 'center', marginBottom: 14 }}>
+            <Text style={{ fontSize: 36, marginBottom: 4 }}>{currentQ?.icon}</Text>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: COLORS.onSurface, textAlign: 'center' }}>
+              {currentQ?.title}
+            </Text>
+            <Text style={{ fontSize: 13, color: COLORS.onSurfaceVariant, textAlign: 'center', marginTop: 4 }}>
+              {currentQ?.prompt}
+            </Text>
+          </View>
+
+          {/* Central Pulsing Microphone Visualizer */}
+          <View style={{ width: 120, height: 120, alignItems: 'center', justifyContent: 'center', marginVertical: 8 }}>
+            {isListening && (
+              <Animated.View
+                style={[
+                  styles.touchlessRipple,
+                  {
+                    transform: [
+                      {
+                        scale: pulseAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 1.8],
+                        }),
+                      },
+                    ],
+                    opacity: pulseAnim.interpolate({
+                      inputRange: [0, 0.7, 1],
+                      outputRange: [0.7, 0.3, 0],
+                    }),
+                  },
+                ]}
+              />
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.touchlessMicBtn,
+                isListening && styles.touchlessMicBtnListening,
+              ]}
+              onPress={() => {
+                if (isListening) {
+                  stopListening();
+                } else {
+                  startListening();
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: 36 }}>{isListening ? '🎙️' : '🎤'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Listening Status & Animated Wave Bars */}
+          <Text style={styles.touchlessMicStatusText}>
+            {isListening
+              ? (currentLang === 'hi' ? 'आर्थिक सुन रहा है...' : 'Aarthika is listening...')
+              : (currentLang === 'hi' ? 'बोलने के लिए माइक दबाएं' : 'Tap mic to speak')}
+          </Text>
+
+          {isListening && (
+            <View style={styles.touchlessWaveRow}>
+              <Animated.View style={[styles.touchlessWaveBar, { height: waveAnim1 }]} />
+              <Animated.View style={[styles.touchlessWaveBar, { height: waveAnim2 }]} />
+              <Animated.View style={[styles.touchlessWaveBar, { height: waveAnim3 }]} />
+              <Animated.View style={[styles.touchlessWaveBar, { height: waveAnim4 }]} />
+            </View>
+          )}
+
+          {/* Real-time Live Transcript Bubble */}
+          {liveTranscript ? (
+            <View style={styles.touchlessLiveTranscriptPill}>
+              <Text style={styles.touchlessLiveTranscriptText}>
+                "{liveTranscript}"
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Tactile / Manual Input Fallback */}
+          <View style={{ width: '100%', marginTop: 16 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.onSurfaceVariant, marginBottom: 4 }}>
+              {currentLang === 'hi' ? 'या नीचे लिखें / सुधारें:' : 'Or edit / type below:'}
+            </Text>
+            <TextInput
+              style={[styles.textInput, { marginBottom: 0 }]}
+              placeholder={currentQ?.placeholder}
+              placeholderTextColor={COLORS.onSurfaceVariant}
+              value={currentQ?.value}
+              onChangeText={(txt) => {
+                currentQ?.setValue(txt);
+                setError('');
+              }}
+              keyboardType={step === 3 ? 'numeric' : 'default'}
+              returnKeyType={step === 3 ? 'done' : 'next'}
+              onSubmitEditing={handleNextStep}
+            />
+          </View>
+
+          {error ? (
+            <View style={[styles.errorBox, { marginTop: 8 }]}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
+
+          {/* Navigation Controls */}
+          <View style={{ flexDirection: 'row', width: '100%', marginTop: 16, gap: 10 }}>
+            {step > 0 && (
+              <TouchableOpacity
+                style={[styles.outlineButton, { flex: 1, minHeight: 46 }]}
+                onPress={() => {
+                  stopListening();
+                  stopSpeaking();
+                  setStep(step - 1);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.outlineButtonText}>
+                  {currentLang === 'hi' ? '← पीछे' : '← Back'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[styles.primaryButton, { flex: step > 0 ? 2 : 1, marginTop: 0, minHeight: 46 }]}
+              onPress={handleNextStep}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.primaryButtonText}>
+                {step === 3
+                  ? (currentLang === 'hi' ? 'पूरा करें ➔' : 'Complete ➔')
+                  : (currentLang === 'hi' ? 'अगला कदम ➔' : 'Next Step ➔')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        /* Step 4: Summary / Confirmation Screen */
+        <View style={styles.card}>
+          <View style={{ alignItems: 'center', marginVertical: 12 }}>
+            <Text style={{ fontSize: 44, marginBottom: 6 }}>🪷</Text>
+            <Text style={{ fontSize: 22, fontWeight: '800', color: COLORS.primary, textAlign: 'center' }}>
+              {currentLang === 'hi' ? '✨ खाता तैयार है!' : '✨ Profile Ready!'}
+            </Text>
+            <Text style={{ fontSize: 13, color: COLORS.onSurfaceVariant, textAlign: 'center', marginTop: 4 }}>
+              {currentLang === 'hi'
+                ? `स्वागत है ${name || 'मित्र'} जी! आपका वित्तीय डैशबोर्ड तैयार है।`
+                : `Welcome ${name || 'Friend'}! Setting up your business financial dashboard...`}
+            </Text>
+          </View>
+
+          <View style={{ marginVertical: 10 }}>
+            <View style={styles.touchlessSummaryItem}>
+              <Text style={styles.touchlessSummaryLabel}>
+                {currentLang === 'hi' ? '👤 नाम' : '👤 Name'}
+              </Text>
+              <Text style={styles.touchlessSummaryValue}>{name || 'Not provided'}</Text>
+            </View>
+
+            <View style={styles.touchlessSummaryItem}>
+              <Text style={styles.touchlessSummaryLabel}>
+                {currentLang === 'hi' ? '📍 स्थान' : '📍 Place'}
+              </Text>
+              <Text style={styles.touchlessSummaryValue}>{place || 'Not provided'}</Text>
+            </View>
+
+            <View style={styles.touchlessSummaryItem}>
+              <Text style={styles.touchlessSummaryLabel}>
+                {currentLang === 'hi' ? '💼 व्यवसाय' : '💼 Occupation'}
+              </Text>
+              <Text style={styles.touchlessSummaryValue}>{occupation || 'Not provided'}</Text>
+            </View>
+
+            <View style={[styles.touchlessSummaryItem, { borderBottomWidth: 0 }]}>
+              <Text style={styles.touchlessSummaryLabel}>
+                {currentLang === 'hi' ? '🎂 उम्र' : '🎂 Age'}
+              </Text>
+              <Text style={styles.touchlessSummaryValue}>
+                {age ? `${age} ${currentLang === 'hi' ? 'वर्ष' : 'years'}` : 'Not provided'}
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { opacity: isSaving ? 0.7 : 1 }]}
+            onPress={handleFinalSubmit}
+            disabled={isSaving}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isSaving
+                ? (currentLang === 'hi' ? 'खाता सहेजा जा रहा है...' : 'Saving Profile...')
+                : (currentLang === 'hi' ? 'आर्थिक शुरू करें ➔' : 'Start Exploring Businesses ➔')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Guest / Skip Option */}
+      <View style={{ alignItems: 'center', marginTop: 14 }}>
+        <TouchableOpacity
+          onPress={() => {
+            stopSpeaking();
+            stopListening();
+            saveTouchlessProfile({
+              name: 'Entrepreneur',
+              place: 'Local',
+              occupation: 'Small Business',
+              age: '30',
+            });
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={{ fontSize: 13, color: COLORS.secondary, fontWeight: '700' }}>
+            {currentLang === 'hi' ? 'अतिथि के रूप में जारी रखें →' : 'Skip & Explore as Guest →'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+}
+
+// Aliases so existing routes never fail
+const LoginScreen = TouchlessAuthScreen;
+const SignupScreen = TouchlessAuthScreen;
 
 // ----------------------------------------------------
 // LANGUAGE SELECTION MODAL (9 LANGUAGES INCLUDING BENGALI)
@@ -1847,6 +2589,185 @@ const styles = StyleSheet.create({
   authHeader: { alignItems: 'center', marginBottom: 16 },
   authTitle: { fontSize: 22, fontWeight: '700', color: COLORS.primary, marginBottom: 4, textAlign: 'center' },
   authSubtitle: { fontSize: 13, color: COLORS.onSurfaceVariant, textAlign: 'center', paddingHorizontal: 10 },
+
+  /* Touchless Auth Screen Styles */
+  touchlessHeader: { alignItems: 'center', marginBottom: 12, marginTop: 4 },
+  touchlessBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(63, 102, 83, 0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 16,
+    marginBottom: 8,
+  },
+  touchlessBadgeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.secondary,
+    marginRight: 6,
+  },
+  touchlessBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.secondary,
+  },
+  touchlessTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: COLORS.onSurface,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  touchlessSubtitle: {
+    fontSize: 13,
+    color: COLORS.onSurfaceVariant,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  touchlessProgressRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  touchlessStepDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.surfaceContainer,
+    borderWidth: 1.5,
+    borderColor: COLORS.outlineVariant,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  touchlessStepDotActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  touchlessStepDotDone: {
+    backgroundColor: COLORS.secondary,
+    borderColor: COLORS.secondary,
+  },
+  touchlessStepDotText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.onSurfaceVariant,
+  },
+  touchlessStepDotTextActive: {
+    color: '#ffffff',
+  },
+  touchlessProgressLine: {
+    width: 20,
+    height: 3,
+    backgroundColor: COLORS.outlineVariant,
+    marginHorizontal: 4,
+    borderRadius: 1.5,
+  },
+  touchlessProgressLineDone: {
+    backgroundColor: COLORS.secondary,
+  },
+  touchlessMicCard: {
+    backgroundColor: COLORS.surfaceContainerLowest,
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(216, 194, 181, 0.4)',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+    marginBottom: 14,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  touchlessRipple: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(244, 162, 97, 0.35)',
+  },
+  touchlessMicBtn: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: COLORS.primaryContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  touchlessMicBtnListening: {
+    backgroundColor: '#3f6653',
+  },
+  touchlessMicStatusText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.onSurface,
+    marginTop: 12,
+  },
+  touchlessWaveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 24,
+    marginTop: 6,
+  },
+  touchlessWaveBar: {
+    width: 4,
+    backgroundColor: COLORS.secondary,
+    borderRadius: 2,
+    marginHorizontal: 3,
+  },
+  touchlessLiveTranscriptPill: {
+    backgroundColor: COLORS.surfaceContainer,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginTop: 10,
+    maxWidth: '92%',
+  },
+  touchlessLiveTranscriptText: {
+    fontSize: 13,
+    color: COLORS.deepForest,
+    fontWeight: '600',
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  touchlessSummaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(216, 194, 181, 0.25)',
+  },
+  touchlessSummaryLabel: {
+    fontSize: 13,
+    color: COLORS.onSurfaceVariant,
+    fontWeight: '600',
+  },
+  touchlessSummaryValue: {
+    fontSize: 14,
+    color: COLORS.onSurface,
+    fontWeight: '700',
+  },
+  touchlessStoredCard: {
+    backgroundColor: COLORS.secondaryContainer,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 
   card: {
     backgroundColor: COLORS.surfaceContainerLowest,

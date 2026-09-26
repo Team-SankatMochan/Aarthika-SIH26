@@ -59,7 +59,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "cross-env EXPO_PUBLIC_API_URL=http://localhost:8000 jest"
+    "test": "cross-env EXPO_PUBLIC_API_URL=http://localhost:8000 jest --runInBand"
   },
   "private": true
 }

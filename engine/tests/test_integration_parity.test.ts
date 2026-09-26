@@ -17,7 +17,7 @@ describe('Integration Parity with Python Backend', () => {
       monthly_household_essential_expenses: 8000,
       existing_monthly_household_debt_payments: 0
     };
-    const policy = { minimum_business_dscr: 1.2, maximum_household_debt_ratio: 0.5 };
+    const policy = { minimum_required_dscr: 1.2, maximum_household_debt_ratio: 0.5 };
     
     const result = calculateFinancialAssessment(inputs, policy);
     

@@ -4,7 +4,15 @@
  */
 
 import { Platform } from 'react-native';
-import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
+
+let ExpoSpeechRecognitionModule: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const speechPkg = require('expo-speech-recognition');
+  ExpoSpeechRecognitionModule = speechPkg?.ExpoSpeechRecognitionModule ?? null;
+} catch (_e) {
+  ExpoSpeechRecognitionModule = null;
+}
 
 export const STT_LANG_MAP: Record<string, string> = {
   en: 'en-IN',
@@ -121,7 +129,7 @@ class WebSpeechProvider implements SpeechInputProvider {
     if (this.recognition) {
       try {
         this.recognition.stop();
-      } catch (e) {
+      } catch (_e) {
         // ignore
       }
       this.recognition = null;
@@ -140,25 +148,25 @@ class NativeSpeechProvider implements SpeechInputProvider {
   private listeners: any[] = [];
 
   constructor() {
-    if (Platform.OS !== 'web') {
+    if (Platform.OS !== 'web' && ExpoSpeechRecognitionModule) {
       this.setupListeners();
     }
   }
 
   private setupListeners() {
-    // using event listener approach from expo-speech-recognition
+    if (!ExpoSpeechRecognitionModule?.addListener) return;
     this.listeners.push(
       ExpoSpeechRecognitionModule.addListener('start', () => {
         this.isListening = true;
         this.currentOptions?.onStart?.();
       }),
-      ExpoSpeechRecognitionModule.addListener('result', (event) => {
+      ExpoSpeechRecognitionModule.addListener('result', (event: any) => {
         const text = event.results[0]?.transcript || '';
         if (text) {
           this.currentOptions?.onResult(text, event.isFinal);
         }
       }),
-      ExpoSpeechRecognitionModule.addListener('error', (event) => {
+      ExpoSpeechRecognitionModule.addListener('error', (event: any) => {
         this.isListening = false;
         console.warn('[STT] Native Recognition error:', event.error, event.message);
         let message = 'माइक की अनुमति नहीं मिली या कोई तकनीकी समस्या है। आप नीचे लिखकर भी जवाब दे सकते हैं।';
@@ -175,7 +183,7 @@ class NativeSpeechProvider implements SpeechInputProvider {
   }
 
   public isSupported(): boolean {
-    return true; // We assume it's supported on native platforms via ExpoSpeechRecognitionModule
+    return !!ExpoSpeechRecognitionModule;
   }
 
   public async startListening(options: STTOptions) {
@@ -184,6 +192,11 @@ class NativeSpeechProvider implements SpeechInputProvider {
     }
     
     this.currentOptions = options;
+
+    if (!ExpoSpeechRecognitionModule) {
+      options.onError?.('Voice recognition is not available on this client runtime. Please type your input.');
+      return;
+    }
 
     try {
       const perms = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
@@ -205,7 +218,11 @@ class NativeSpeechProvider implements SpeechInputProvider {
   }
 
   public stopListening() {
-    ExpoSpeechRecognitionModule.stop();
+    try {
+      ExpoSpeechRecognitionModule?.stop?.();
+    } catch (_e) {
+      // ignore
+    }
     this.isListening = false;
   }
 
@@ -229,8 +246,15 @@ class SpeechToTextService {
   constructor() {
     if (Platform.OS === 'web') {
       this.provider = new WebSpeechProvider();
-    } else {
+    } else if (ExpoSpeechRecognitionModule) {
       this.provider = new NativeSpeechProvider();
+    } else {
+      const webProvider = new WebSpeechProvider();
+      if (webProvider.isSupported()) {
+        this.provider = webProvider;
+      } else {
+        this.provider = new ManualInputFallback();
+      }
     }
   }
 
