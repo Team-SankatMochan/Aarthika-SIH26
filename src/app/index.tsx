@@ -1609,6 +1609,12 @@ function RiskTestScreen() {
           ...(explanation.caveats || []),
         ].filter(Boolean);
         localDashboard.recommendation.actionItems = explanation.suggested_next_steps || localDashboard.recommendation.actionItems;
+        if (backendReport.market_data_status === 'VERIFIED_DATA') {
+          localDashboard.marketDataStatus = 'VERIFIED_DATA';
+          if (localDashboard.provenance) {
+            localDashboard.provenance.marketData = 'VERIFIED_DATA';
+          }
+        }
         setReportStatus('READY');
       } else {
         setReportStatus(snapshot.businessAnalysisAvailable ? 'PARTIAL' : 'INSUFFICIENT_DATA');

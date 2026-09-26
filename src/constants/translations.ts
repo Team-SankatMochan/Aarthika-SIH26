@@ -119,11 +119,7 @@ export const AARTHIKA_TRANSLATIONS: Record<string, TranslationDict> = {
     ai_analysis_sub: 'Multi-Agent AI Decision System',
     hear_ai_verdict: '🔊 Hear the AI Verdict',
     ai_analyzing_title: 'Aarthika AI is analyzing your business...',
-    ai_analyzing_sub: '(Context Retrieval → Market Analyst → Risk Actuary → Final Decision)',
-    decision_go: 'GO - HIGH VIABILITY',
-    decision_caution: 'CAUTION - NEEDS MODIFICATION',
-    decision_nogo: 'NO-GO - HIGH RISK',
-    overall_risk_score: 'Overall Risk Score',
+
     business_viability_score: 'Business Viability Score',
     financial_resilience: 'Financial Resilience',
     what_if_simulator_title: 'Interactive What-If Simulator',
@@ -163,7 +159,6 @@ export const AARTHIKA_TRANSLATIONS: Record<string, TranslationDict> = {
     welcome_back_sub: 'Log in to manage your business with clarity.',
     password_label: 'Password',
     log_in_btn: 'Log In →',
-    quick_demo_login: '⚡ Quick Demo Login',
     new_to_aarthika: 'New to Aarthika? ',
     create_account_link: 'Create an account',
 
@@ -297,11 +292,7 @@ export const AARTHIKA_TRANSLATIONS: Record<string, TranslationDict> = {
     ai_analysis_sub: 'मल्टी-एजेंट एआई निर्णय प्रणाली',
     hear_ai_verdict: '🔊 एआई का फैसला सुनें',
     ai_analyzing_title: 'आरथिका एआई आपके व्यापार का विश्लेषण कर रही है...',
-    ai_analyzing_sub: '(डेटा मिलान → बाज़ार विशेषज्ञ → जोखिम विश्लेषक → अंतिम निर्णय)',
-    decision_go: 'आगे बढ़ें (उच्च व्यवहार्यता)',
-    decision_caution: 'सावधानी (योजना में सुधार आवश्यक)',
-    decision_nogo: 'अभी निवेश न करें (उच्च जोखिम)',
-    overall_risk_score: 'समग्र जोखिम स्कोर',
+
     business_viability_score: 'व्यापार व्यवहार्यता स्कोर',
     financial_resilience: 'वित्तीय लचीलापन',
     what_if_simulator_title: 'इंटरेक्टिव व्हाट-इफ सिम्युलेटर',
@@ -341,7 +332,6 @@ export const AARTHIKA_TRANSLATIONS: Record<string, TranslationDict> = {
     welcome_back_sub: 'स्पष्टता के साथ अपने व्यवसाय की योजना बनाने के लिए लॉग इन करें।',
     password_label: 'पासवर्ड',
     log_in_btn: 'लॉग इन करें →',
-    quick_demo_login: '⚡ तुरंत डेमो लॉग इन',
     new_to_aarthika: 'आरथिका पर नए हैं? ',
     create_account_link: 'खाता बनाएं',
 
@@ -475,11 +465,7 @@ export const AARTHIKA_TRANSLATIONS: Record<string, TranslationDict> = {
     ai_analysis_sub: 'মাল্টি-এজেন্ট এআই সিদ্ধান্ত ব্যবস্থা',
     hear_ai_verdict: '🔊 এআই-এর রায় শুনুন',
     ai_analyzing_title: 'আর্থিকা এআই আপনার ব্যবসা বিশ্লেষণ করছে...',
-    ai_analyzing_sub: '(তথ্য অনুসন্ধান → বাজার বিশেষজ্ঞ → ঝুঁকি বিশ্লেষক → চূড়ান্ত সিদ্ধান্ত)',
-    decision_go: 'এগিয়ে যান (উচ্চ সম্ভাবনাময়)',
-    decision_caution: 'সতর্কতা (পরিকল্পনা সংশোধন প্রয়োজন)',
-    decision_nogo: 'এখনই নয় (অতিরিক্ত ঝুঁকি)',
-    overall_risk_score: 'সামগ্রিক ঝুঁকি স্কোর',
+
     business_viability_score: 'ব্যবসার সক্ষমতা স্কোর',
     financial_resilience: 'আর্থিক সহনশীলতা',
     what_if_simulator_title: 'ইন্টারেক্টিভ সিমুলেটর',
@@ -519,7 +505,6 @@ export const AARTHIKA_TRANSLATIONS: Record<string, TranslationDict> = {
     welcome_back_sub: 'স্পষ্টতার সাথে ব্যবসা পরিচালনা করতে লগ ইন করুন।',
     password_label: 'পাসওয়ার্ড',
     log_in_btn: 'লগ ইন করুন →',
-    quick_demo_login: '⚡ দ্রুত ডেমো লগ ইন',
     new_to_aarthika: 'আর্থিকায় নতুন? ',
     create_account_link: 'অ্যাকাউন্ট তৈরি করুন',
 

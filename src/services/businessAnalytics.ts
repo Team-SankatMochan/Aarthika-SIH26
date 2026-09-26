@@ -80,17 +80,18 @@ export interface StressScenarioResult {
   fixedCost: number;
   operatingSurplus: number;
   emi: number | null;
+  loanEMI: number | null;
   dscr: number | null;
+  postEmiCashFlow: number | null;
   businessAffordabilityStatus: string;
   householdAffordabilityStatus: string;
   overallReadiness: string;
   readiness: string; // for backward compatibility, mirrors overallReadiness
   revenueChange: number;
   costChange: number;
-  netCashFlow: number;
+  netCashFlow: number | null;
   monthlyRevenue: number;
   monthlyExpenses: number;
-  loanEMI: number;
 }
 
 export interface RiskFinding {
@@ -120,11 +121,11 @@ export interface AnalyticsSnapshot {
   inputHash: string;
   missingFields: string[];
 
-  // Section status breakdown (Section Z)
-  businessAnalysisStatus: 'COMPLETE' | 'VIABLE' | 'STRUCTURALLY_UNVIABLE' | 'INSUFFICIENT_DATA';
+  // Section status breakdown (Section Z & Item 16)
+  businessAnalysisStatus: 'COMPLETE' | 'STRUCTURALLY_UNVIABLE' | 'INSUFFICIENT_DATA';
   financingAnalysisStatus: 'COMPLETE' | 'SCHEME_ROUTED' | 'INCOMPLETE';
   householdAnalysisStatus: 'COMPLETE' | 'INCOMPLETE' | 'INSUFFICIENT_DATA';
-  marketAnalysisStatus: 'VERIFIED_DATA' | 'NO_VERIFIED_DATA';
+  marketAnalysisStatus: 'VERIFIED_DATA' | 'USER_PROVIDED_ONLY' | 'NO_VERIFIED_DATA';
 
   // Raw user inputs
   inputs: BusinessPlanInputs;
@@ -172,12 +173,14 @@ export interface AnalyticsSnapshot {
     threats: SwotItem[];
   };
 
-  // Provenance breakdown
+  // Provenance breakdown (Item 9)
   provenance: {
     userProvided: string[];
+    userConfirmedEstimate: string[];
+    governmentRule: string[];
     calculations: string[];
-    governmentRule: string;
-    marketData: 'NO_VERIFIED_DATA' | 'VERIFIED_DATA';
+    notProvided: string[];
+    marketData: 'NO_VERIFIED_DATA' | 'USER_PROVIDED_ONLY' | 'VERIFIED_DATA';
     aiExplanationOnly: boolean;
   };
 }
@@ -220,20 +223,52 @@ export function createBlankCustomBusiness(title: string) {
   };
 }
 
+function toUtf8Bytes(str: string): number[] {
+  const bytes: number[] = [];
+  for (let i = 0; i < str.length; i++) {
+    let c = str.charCodeAt(i);
+    if (c < 0x80) {
+      bytes.push(c);
+    } else if (c < 0x800) {
+      bytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    } else if (c < 0xd800 || c >= 0xe000) {
+      bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    } else {
+      i++;
+      c = 0x10000 + (((c & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff));
+      bytes.push(
+        0xf0 | (c >> 18),
+        0x80 | ((c >> 12) & 0x3f),
+        0x80 | ((c >> 6) & 0x3f),
+        0x80 | (c & 0x3f)
+      );
+    }
+  }
+  return bytes;
+}
+
 /**
  * Pure JS SHA-256 implementation for portable input hashing across React Native and Node.
  */
-function sha256Hex(str: string): string {
+export function sha256Hex(str: string): string {
   function rightRotate(value: number, amount: number) {
     return (value >>> amount) | (value << (32 - amount));
   }
-  const mathPow = Math.pow;
-  const maxWord = mathPow(2, 32);
   let i: number, j: number;
   let result = '';
 
+  const bytes = toUtf8Bytes(str);
+  const bitLength = bytes.length * 8;
   const words: number[] = [];
-  const asciiBitLength = str.length * 8;
+  for (i = 0; i < bytes.length; i++) {
+    words[i >> 2] = (words[i >> 2] || 0) | (bytes[i] << ((3 - (i % 4)) * 8));
+  }
+  words[bitLength >> 5] = (words[bitLength >> 5] || 0) | (0x80 << (24 - (bitLength % 32)));
+  const totalWords = (((bitLength + 64) >> 9) << 4) + 16;
+  while (words.length < totalWords) {
+    words.push(0);
+  }
+  words[totalWords - 1] = bitLength;
 
   let hash = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
@@ -250,13 +285,6 @@ function sha256Hex(str: string): string {
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
   ];
-
-  for (i = 0; i < str.length; i++) {
-    const charCode = str.charCodeAt(i);
-    words[i >> 2] |= charCode << ((3 - (i % 4)) * 8);
-  }
-  words[asciiBitLength >> 5] |= 0x80 << (24 - (asciiBitLength % 32));
-  words[(((asciiBitLength + 64) >> 9) << 4) + 15] = asciiBitLength;
 
   for (i = 0; i < words.length; i += 16) {
     const w = words.slice(i, i + 16);
@@ -292,19 +320,53 @@ function sha256Hex(str: string): string {
 }
 
 /**
+ * Normalize numeric values to canonical decimal string representation.
+ * 600 -> "600", 600.00 -> "600", 6.50 -> "6.5", 0 -> "0"
+ */
+export function normalizeCanonicalValue(v: any): string {
+  if (v === null || v === undefined) {
+    return '';
+  }
+  if (typeof v === 'number') {
+    if (Number.isInteger(v)) {
+      return String(v);
+    }
+    const s = String(v);
+    if (s.includes('.')) {
+      const stripped = s.replace(/\.?0+$/, '');
+      return stripped === '' ? '0' : stripped;
+    }
+    return s;
+  }
+  if (typeof v === 'string') {
+    const trimmed = v.trim();
+    if (trimmed !== '' && !isNaN(Number(trimmed)) && !trimmed.includes('e') && !trimmed.includes('E')) {
+      if (trimmed.includes('.')) {
+        const stripped = trimmed.replace(/\.?0+$/, '');
+        return stripped === '' ? '0' : stripped;
+      }
+      return trimmed;
+    }
+    return v;
+  }
+  return String(v);
+}
+
+/**
  * Compute SHA-256 hash matching backend compute_input_hash
  */
 export function computeInputHash(inputs: Record<string, any>, policyVersion: string): string {
   const canonical: Record<string, string> = {};
-  const sortedKeys = Object.keys(inputs).sort();
-  for (const k of sortedKeys) {
-    const v = inputs[k];
-    if (v !== null && v !== undefined) {
-      canonical[k] = String(v);
+  const allKeys = Array.from(new Set([...Object.keys(inputs), '_policy_version'])).sort();
+  for (const k of allKeys) {
+    if (k === '_policy_version') {
+      canonical[k] = normalizeCanonicalValue(policyVersion);
+    } else if (inputs[k] !== null && inputs[k] !== undefined) {
+      canonical[k] = normalizeCanonicalValue(inputs[k]);
     }
   }
-  canonical['_policy_version'] = String(policyVersion);
-  return sha256Hex(JSON.stringify(canonical));
+  const compactJson = JSON.stringify(canonical);
+  return sha256Hex(compactJson);
 }
 
 // ── Core Analytics ──────────────────────────────────────────────────────────
@@ -484,10 +546,60 @@ export function generateAnalyticsSnapshot(plan: BusinessPlanInputs): AnalyticsSn
   const policyVersion = String(AARTHIKA_CALCULATION_POLICY.policy_version || 'policy-2026-v1');
   const inputHash = computeInputHash(canonicalInputs, policyVersion);
 
+  const userProvided: string[] = [];
+  const userConfirmedEstimate: string[] = [];
+  const notProvided: string[] = [];
+
+  const fieldKeys: (keyof BusinessPlanInputs)[] = [
+    'monthlyUnitsSold',
+    'sellingPricePerUnit',
+    'variableCostPerUnit',
+    'monthlyBusinessFixedCost',
+    'availableMarginCapital',
+    'requestedLoanAmount',
+    'householdEssentialExpenses',
+    'householdNonBusinessIncome',
+    'existingHouseholdEMI',
+  ];
+
+  for (const k of fieldKeys) {
+    const val = plan[k];
+    if (val === null || val === undefined) {
+      notProvided.push(k);
+    } else {
+      const prov = plan.fieldProvenance?.[k];
+      if (prov === 'USER_CONFIRMED_ESTIMATE') {
+        userConfirmedEstimate.push(k);
+      } else {
+        userProvided.push(k);
+      }
+    }
+  }
+
+  const governmentRule: string[] = [];
+  if (scheme && !scheme.isOutOfScope) {
+    governmentRule.push(
+      `Scheme: ${scheme.schemeName}`,
+      `Interest rate: ${scheme.interestRate}%`,
+      `Loan cap: ₹${(scheme.schemeLoanCap / 100000).toFixed(2)}L`,
+      `Tenure: ${scheme.totalTenureMonths}m (${scheme.moratoriumMonths}m moratorium + ${scheme.activeRepaymentMonths}m repayment)`
+    );
+  }
+
+  const calculations = [
+    'Monthly Revenue = units × price',
+    'Business Operating Surplus = revenue - variable costs - fixed costs',
+    'Break-even Units & Revenue',
+    'Candidate EMI & Business DSCR',
+    'Stress Scenarios (DEMAND_DROP_20, RAW_MATERIAL_UP_20)',
+  ];
+
   const provenance = {
-    userProvided: Object.keys(canonicalInputs).filter(k => canonicalInputs[k] !== undefined && canonicalInputs[k] !== null),
-    calculations: ['Revenue', 'Break-even', 'Candidate EMI', 'Business DSCR', 'Stress Scenarios'],
-    governmentRule: scheme && !scheme.isOutOfScope ? scheme.schemeName : 'None (No margin capital provided)',
+    userProvided,
+    userConfirmedEstimate,
+    governmentRule: governmentRule.length > 0 ? governmentRule : ['None (No margin capital provided)'],
+    calculations,
+    notProvided,
     marketData: 'NO_VERIFIED_DATA' as const,
     aiExplanationOnly: true,
   };
@@ -549,7 +661,9 @@ function generateStressScenarios(
   const baseVarCost = baseResult.monthly_variable_cost ?? 0;
   const baseFixed = baseResult.monthly_fixed_cost ?? 0;
   const baseSurplus = baseResult.monthly_operating_surplus ?? 0;
-  const baseEmi = baseResult.candidate_emi ?? 0;
+  const baseEmi = baseResult.candidate_emi ?? null;
+  const baseLoanEmi = baseEmi;
+  const basePostEmiCash = baseEmi !== null ? baseSurplus - baseEmi : null;
 
   const baseDscr = baseResult.business_dscr ?? null;
   const baseBizStatus = deriveBusinessAffordabilityStatus(baseDscr, baseSurplus, baseResult.business_affordability_status);
@@ -562,18 +676,19 @@ function generateStressScenarios(
     variableCost: baseVarCost,
     fixedCost: baseFixed,
     operatingSurplus: baseSurplus,
-    emi: baseEmi || null,
+    emi: baseEmi,
+    loanEMI: baseLoanEmi,
     dscr: baseDscr,
+    postEmiCashFlow: basePostEmiCash,
     businessAffordabilityStatus: baseBizStatus,
     householdAffordabilityStatus: baseResult.household_affordability_status ?? 'INCOMPLETE',
     overallReadiness: baseResult.overall_readiness ?? 'INCOMPLETE',
     readiness: baseResult.overall_readiness ?? 'INCOMPLETE',
     revenueChange: 0,
     costChange: 0,
-    netCashFlow: baseSurplus - baseEmi,
+    netCashFlow: basePostEmiCash,
     monthlyRevenue: baseRevenue,
     monthlyExpenses: baseVarCost + baseFixed,
-    loanEMI: baseEmi,
   });
 
   // DEMAND_DROP_20: reduce monthly units by 20%
@@ -587,8 +702,10 @@ function generateStressScenarios(
     const varC = demandResult.monthly_variable_cost ?? 0;
     const fixed = demandResult.monthly_fixed_cost ?? 0;
     const surplus = demandResult.monthly_operating_surplus ?? 0;
-    const emi = demandResult.candidate_emi ?? baseEmi;
-    const dscr = demandResult.business_dscr ?? (emi > 0 ? surplus / emi : null);
+    const emi = demandResult.candidate_emi !== undefined ? demandResult.candidate_emi : baseEmi;
+    const loanEMI = emi ?? null;
+    const postEmiCash = emi != null ? surplus - emi : null;
+    const dscr = demandResult.business_dscr ?? (emi != null && emi > 0 ? surplus / emi : null);
     const bizStatus = deriveBusinessAffordabilityStatus(dscr, surplus, demandResult.business_affordability_status);
 
     scenarios.push({
@@ -598,18 +715,19 @@ function generateStressScenarios(
       variableCost: varC,
       fixedCost: fixed,
       operatingSurplus: surplus,
-      emi: emi || null,
+      emi: emi ?? null,
+      loanEMI,
       dscr,
+      postEmiCashFlow: postEmiCash,
       businessAffordabilityStatus: bizStatus,
       householdAffordabilityStatus: demandResult.household_affordability_status ?? 'INCOMPLETE',
       overallReadiness: demandResult.overall_readiness ?? 'INCOMPLETE',
       readiness: demandResult.overall_readiness ?? 'INCOMPLETE',
       revenueChange: -20,
       costChange: 0,
-      netCashFlow: surplus - emi,
+      netCashFlow: postEmiCash,
       monthlyRevenue: rev,
       monthlyExpenses: varC + fixed,
-      loanEMI: emi,
     });
   } catch (e) {
     console.warn('[BusinessAnalytics] DEMAND_DROP_20 stress failed:', e);
@@ -626,8 +744,10 @@ function generateStressScenarios(
     const varC = rawMatResult.monthly_variable_cost ?? 0;
     const fixed = rawMatResult.monthly_fixed_cost ?? 0;
     const surplus = rawMatResult.monthly_operating_surplus ?? 0;
-    const emi = rawMatResult.candidate_emi ?? baseEmi;
-    const dscr = rawMatResult.business_dscr ?? (emi > 0 ? surplus / emi : null);
+    const emi = rawMatResult.candidate_emi !== undefined ? rawMatResult.candidate_emi : baseEmi;
+    const loanEMI = emi ?? null;
+    const postEmiCash = emi != null ? surplus - emi : null;
+    const dscr = rawMatResult.business_dscr ?? (emi != null && emi > 0 ? surplus / emi : null);
     const bizStatus = deriveBusinessAffordabilityStatus(dscr, surplus, rawMatResult.business_affordability_status);
 
     scenarios.push({
@@ -637,18 +757,19 @@ function generateStressScenarios(
       variableCost: varC,
       fixedCost: fixed,
       operatingSurplus: surplus,
-      emi: emi || null,
+      emi: emi ?? null,
+      loanEMI,
       dscr,
+      postEmiCashFlow: postEmiCash,
       businessAffordabilityStatus: bizStatus,
       householdAffordabilityStatus: rawMatResult.household_affordability_status ?? 'INCOMPLETE',
       overallReadiness: rawMatResult.overall_readiness ?? 'INCOMPLETE',
       readiness: rawMatResult.overall_readiness ?? 'INCOMPLETE',
       revenueChange: 0,
       costChange: 20,
-      netCashFlow: surplus - emi,
+      netCashFlow: postEmiCash,
       monthlyRevenue: rev,
       monthlyExpenses: varC + fixed,
-      loanEMI: emi,
     });
   } catch (e) {
     console.warn('[BusinessAnalytics] RAW_MATERIAL_UP_20 stress failed:', e);
@@ -1009,23 +1130,28 @@ export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<str
     swot,
     risks,
     financials: {
-      monthlyRevenue: snapshot.monthlyRevenue ?? 0,
-      monthlyExpenses: (snapshot.monthlyVariableCost ?? 0) + (snapshot.monthlyFixedCost ?? 0),
-      loanEMI: snapshot.candidateEmi ?? 0,
-      netCashFlow: snapshot.operatingSurplus ?? 0,
-      breakEvenRevenue: snapshot.breakEvenRevenue ?? 0,
+      monthlyRevenue: snapshot.monthlyRevenue,
+      monthlyExpenses: snapshot.monthlyVariableCost != null || snapshot.monthlyFixedCost != null
+        ? (snapshot.monthlyVariableCost ?? 0) + (snapshot.monthlyFixedCost ?? 0)
+        : null,
+      loanEMI: snapshot.candidateEmi,
+      operatingSurplus: snapshot.operatingSurplus,
+      netCashFlow: snapshot.operatingSurplus,
+      breakEvenRevenue: snapshot.breakEvenRevenue,
+      breakEvenUnits: snapshot.breakEvenUnits,
+      breakEvenStatus: snapshot.breakEvenStatus,
       safetyMargin: snapshot.monthlyRevenue != null && snapshot.breakEvenRevenue != null
         ? snapshot.monthlyRevenue - snapshot.breakEvenRevenue
-        : 0,
+        : null,
     },
     baseInputs: {
-      pricePerUnit: plan.sellingPricePerUnit ?? 0,
-      costPerUnit: plan.variableCostPerUnit ?? 0,
-      salesPerMonth: plan.monthlyUnitsSold ?? 0,
-      monthlyFixed: snapshot.monthlyFixedCost ?? 0,
-      personalCost: plan.householdEssentialExpenses ?? 0,
-      householdEssentialExpenses: plan.householdEssentialExpenses ?? 0,
-      setupCost: plan.setupCost ?? 0,
+      pricePerUnit: plan.sellingPricePerUnit ?? null,
+      costPerUnit: plan.variableCostPerUnit ?? null,
+      salesPerMonth: plan.monthlyUnitsSold ?? null,
+      monthlyFixed: snapshot.monthlyFixedCost ?? null,
+      personalCost: plan.householdEssentialExpenses ?? null,
+      householdEssentialExpenses: plan.householdEssentialExpenses ?? null,
+      setupCost: plan.setupCost ?? null,
       availableMarginCapital: plan.availableMarginCapital ?? null,
       loanAmount: fr.recommended_loan_amount ?? fr.requested_loan_amount ?? null,
       interestRatePercent: schemeInterest,

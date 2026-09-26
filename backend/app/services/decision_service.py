@@ -96,8 +96,21 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
 
     # 4. Formulate Decision (Exact Readiness Rules)
     
+    # Check if project exceeds SIH scheme limits (> ₹50 lakh) only when margin capital is present and > 0
+    margin_cap = None
+    if latest_assumption and latest_assumption.available_margin_capital is not None:
+        try:
+            margin_cap = float(latest_assumption.available_margin_capital)
+        except (ValueError, TypeError):
+            margin_cap = None
+
+    if margin_cap is not None and margin_cap > 0 and (margin_cap / 0.10) > 5000000.0:
+        decision_code = "OUT_OF_SCOPE"
+        rationale = "Project cost exceeds SIH Term Loan scheme cap of ₹50 lakh."
+        confidence = None
+
     # Check if core business data is missing
-    if not latest_fa or latest_fa.business_dscr is None:
+    elif not latest_fa or latest_fa.business_dscr is None:
         decision_code = "INSUFFICIENT_DATA"
         rationale = "Missing core business data (cannot calculate EMI or Business DSCR)."
         confidence = None
@@ -137,17 +150,20 @@ def evaluate_business_decision(business_id: str, db: Session) -> Decision:
     }
 
     assumptions_summary = {
-        "selling_price": float(latest_assumption.selling_price) if latest_assumption else 0.0,
-        "production_volume": float(latest_assumption.production_volume) if latest_assumption else 0.0,
-        "raw_material_cost": float(latest_assumption.raw_material_cost) if latest_assumption else 0.0,
-        "assumption_source": latest_assumption.assumption_source if latest_assumption else "NONE",
+        "selling_price_per_unit": float(latest_assumption.selling_price_per_unit) if (latest_assumption and latest_assumption.selling_price_per_unit is not None) else None,
+        "monthly_units_sold": float(latest_assumption.monthly_units_sold) if (latest_assumption and latest_assumption.monthly_units_sold is not None) else None,
+        "variable_cost_per_unit": float(latest_assumption.variable_cost_per_unit) if (latest_assumption and latest_assumption.variable_cost_per_unit is not None) else None,
+        "monthly_fixed_cost": float(latest_assumption.monthly_fixed_cost) if (latest_assumption and latest_assumption.monthly_fixed_cost is not None) else None,
+        "available_margin_capital": float(latest_assumption.available_margin_capital) if (latest_assumption and latest_assumption.available_margin_capital is not None) else None,
+        "requested_loan_amount": float(latest_assumption.requested_loan_amount) if (latest_assumption and latest_assumption.requested_loan_amount is not None) else None,
+        "assumption_source": latest_assumption.assumption_source if latest_assumption else "NOT_PROVIDED",
     }
 
     financial_risk_summary = {
         "affordability_status": latest_fa.debt_affordability_status if latest_fa else "NOT_EVALUATED",
-        "maximum_loan": float(latest_fa.maximum_loan) if latest_fa else 0.0,
-        "recommended_loan": float(latest_fa.recommended_loan) if latest_fa else 0.0,
-        "monthly_emi": float(latest_fa.emi) if latest_fa else 0.0,
+        "maximum_loan": float(latest_fa.maximum_loan) if (latest_fa and latest_fa.maximum_loan is not None) else None,
+        "recommended_loan": float(latest_fa.recommended_loan) if (latest_fa and latest_fa.recommended_loan is not None) else None,
+        "monthly_emi": float(latest_fa.emi) if (latest_fa and latest_fa.emi is not None) else None,
         "scenarios_survived": scenarios_survived,
         "scenarios_insolvent": scenarios_insolvent,
     }

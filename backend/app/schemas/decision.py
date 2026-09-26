@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class DecisionBase(BaseModel):
     business_id: str = Field(..., max_length=64)
-    decision: str = Field(..., examples=["READY_FOR_FINANCE_REVIEW", "HIGH_RISK", "TEST_FIRST", "MODIFY", "INCOMPLETE", "INSUFFICIENT_DATA"])
+    decision: str = Field(..., examples=["READY_FOR_FINANCE_REVIEW", "HIGH_RISK", "TEST_FIRST", "MODIFY", "INCOMPLETE", "INSUFFICIENT_DATA", "OUT_OF_SCOPE"])
     rationale: str = Field(..., min_length=5, examples=["Business demonstrates positive unit economics with DSCR >= 1.25 under standard stress test."])
     confidence: Optional[Decimal] = Field(default=None, ge=0, le=1, examples=[0.85])
     evidence_summary: Optional[Dict[str, Any]] = Field(default_factory=dict)
@@ -22,6 +22,7 @@ class DecisionBase(BaseModel):
             "MODIFY",
             "INCOMPLETE",
             "INSUFFICIENT_DATA",
+            "OUT_OF_SCOPE",
         }
         dec_upper = self.decision.upper()
         if dec_upper not in valid:

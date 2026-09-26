@@ -114,15 +114,52 @@ def evaluate_readiness_from_ratios(
     return result
 
 
+def normalize_canonical_value(v: Any) -> str:
+    """Normalize numeric values to canonical decimal string representation."""
+    if v is None:
+        return ""
+    if isinstance(v, (int, float, Decimal)):
+        s = f"{Decimal(str(v)):f}"
+        if "." in s:
+            s = s.rstrip("0").rstrip(".")
+        return s if s != "-0" else "0"
+    if isinstance(v, str):
+        stripped = v.strip()
+        try:
+            d = Decimal(stripped)
+            s = f"{d:f}"
+            if "." in s:
+                s = s.rstrip("0").rstrip(".")
+            return s if s != "-0" else "0"
+        except Exception:
+            return v
+    return str(v)
+
+
 def compute_input_hash(inputs: Dict[str, Any], policy_version: str) -> str:
-    """SHA-256 hash of canonical normalized inputs + policy version."""
+    """
+    SHA-256 hash of canonical normalized inputs + policy version.
+    1. Normalizes all numeric values to canonical text (no scientific notation, no trailing zeros).
+    2. Includes only non-null fields.
+    3. Includes _policy_version.
+    4. Sorts all keys lexicographically including _policy_version.
+    5. Compact JSON with no whitespace: separators=(',', ':')
+    6. UTF-8 encoded before SHA-256.
+    """
     canonical = {}
-    for k in sorted(inputs.keys()):
-        v = inputs[k]
-        if v is not None:
-            canonical[k] = str(v)
-    canonical["_policy_version"] = policy_version
-    return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
+    all_keys = sorted(set(list(inputs.keys()) + ["_policy_version"]))
+    for k in all_keys:
+        if k == "_policy_version":
+            canonical[k] = normalize_canonical_value(policy_version)
+        elif k in inputs and inputs[k] is not None:
+            canonical[k] = normalize_canonical_value(inputs[k])
+    compact_json = json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(compact_json.encode("utf-8")).hexdigest()
 
 
 # ── Full production calculator ──

@@ -19,9 +19,12 @@ from app.models.user import User
 from app.models.business import Business
 from app.models.business_assumption import BusinessAssumption
 from app.models.evidence import Evidence
+from app.models.evidence_enums import SourceType, EvidenceType
 from app.schemas.decision import DecisionCreate, DecisionBase
 from app.services.scheme_rules import get_sih_scheme_terms
-from app.services.finance_calculator import calculate_financial_assessment
+from app.services.finance_calculator import calculate_financial_assessment, compute_input_hash
+from app.services.decision_service import evaluate_business_decision
+from app.api.routes.ai_reports import is_verified_market_evidence
 import json
 import os
 
@@ -293,3 +296,150 @@ def test_25_no_market_evidence_yields_no_verified_data(client, db_session):
     report = client.post("/ai/generate-report", json={"business_id": biz.id}).json()
     assert report["market_data_status"] == "NO_VERIFIED_DATA"
     assert report["provenance"]["market_data_status"] == "NO_VERIFIED_DATA"
+
+
+def test_26_cross_language_hash_fixtures():
+    """Test 26: Cross-language hash fixture verification against finance-spec/input-hash-fixtures.json."""
+    fixture_path = os.path.join(os.path.dirname(__file__), "../../finance-spec/input-hash-fixtures.json")
+    with open(fixture_path, "r", encoding="utf-8") as f:
+        fixtures = json.load(f)
+
+    assert len(fixtures) >= 5
+
+    for item in fixtures:
+        computed_hash = compute_input_hash(item["inputs"], item["policy_version"])
+        assert computed_hash == item["expected_hash"], f"Failed for {item['id']}"
+
+
+def test_27_market_evidence_strict_verification():
+    """Test 27: Strict verification of market evidence."""
+    class DummyEvidence:
+        def __init__(self, source_type, evidence_type):
+            self.source_type = source_type
+            self.evidence_type = evidence_type
+
+    # Excluded sources
+    assert is_verified_market_evidence(DummyEvidence(SourceType.MOCK_DEMO, EvidenceType.MARKET_PRICE)) is False
+    assert is_verified_market_evidence(DummyEvidence(SourceType.ESTIMATED, EvidenceType.MARKET_PRICE)) is False
+    assert is_verified_market_evidence(DummyEvidence(SourceType.LEGACY_UNKNOWN, EvidenceType.MARKET_PRICE)) is False
+    assert is_verified_market_evidence(DummyEvidence(SourceType.USER_ENTERED, EvidenceType.MARKET_PRICE)) is False
+
+    # Excluded evidence type
+    assert is_verified_market_evidence(DummyEvidence(SourceType.GOVERNMENT, EvidenceType.BUSINESS_CONTEXT)) is False
+
+    # Legitimate verified market evidence
+    assert is_verified_market_evidence(DummyEvidence(SourceType.GOVERNMENT, EvidenceType.MARKET_PRICE)) is True
+    assert is_verified_market_evidence(DummyEvidence(SourceType.MARKET_PROVIDER, EvidenceType.DISTRICT_STATISTIC)) is True
+    assert is_verified_market_evidence(DummyEvidence(SourceType.PILOT_OBSERVED, EvidenceType.MARKET_PRICE)) is True
+
+
+def test_28_ai_fallback_missing_surplus_produces_needs_more_info(client, db_session):
+    """Test 28: Missing surplus does not turn into ₹0 in AI fallback report."""
+    user = User(id="user_test_28", name="Meena", available_capital=Decimal("5000.00"))
+    db_session.add(user)
+    db_session.commit()
+
+    biz = Business(id="biz_test_28", user_id=user.id, business_name="Incomplete Shop", business_category="Retail")
+    db_session.add(biz)
+    db_session.commit()
+
+    # Create assumption missing selling price and variable cost
+    a = BusinessAssumption(
+        business_id=biz.id,
+        monthly_units_sold=Decimal("100"),
+        monthly_fixed_cost=Decimal("2000"),
+    )
+    db_session.add(a)
+    db_session.commit()
+
+    res = client.post("/ai/generate-report", json={"business_id": biz.id})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["deterministic_snapshot"]["monthly_operating_surplus"] is None
+    # Explanation must NOT claim ₹0
+    summary = data["explanation"]["summary"]
+    assert "₹0" not in summary
+    assert "need more information" in summary.lower() or "needs more information" in summary.lower()
+
+
+def test_29_out_of_scope_contract_and_emission(db_session):
+    """Test 29: OUT_OF_SCOPE is accepted by schema and only emitted when project cost > ₹50L."""
+    # Schema validation
+    d = DecisionBase(
+        business_id="biz_oos_test",
+        decision="OUT_OF_SCOPE",
+        rationale="Project exceeds maximum SIH scheme limit of ₹50 lakh."
+    )
+    assert d.decision == "OUT_OF_SCOPE"
+
+    user = User(id="user_test_29", name="Vikram", available_capital=Decimal("600000.00"))
+    db_session.add(user)
+    db_session.commit()
+
+    biz = Business(id="biz_test_29", user_id=user.id, business_name="Factory", business_category="Manufacturing")
+    db_session.add(biz)
+    db_session.commit()
+
+    # Margin capital 600,000 -> Project cost 6,000,000 (> 50 Lakh cap)
+    a = BusinessAssumption(
+        business_id=biz.id,
+        monthly_units_sold=Decimal("5000"),
+        selling_price_per_unit=Decimal("200"),
+        variable_cost_per_unit=Decimal("100"),
+        monthly_fixed_cost=Decimal("50000"),
+        available_margin_capital=Decimal("600000"),
+    )
+    db_session.add(a)
+    db_session.commit()
+
+    decision = evaluate_business_decision(biz.id, db_session)
+    assert decision.decision == "OUT_OF_SCOPE"
+
+    # When margin capital is missing / 0, it must NOT be OUT_OF_SCOPE
+    biz2 = Business(id="biz_test_29_zero", user_id=user.id, business_name="Shop", business_category="Retail")
+    db_session.add(biz2)
+    db_session.commit()
+
+    a2 = BusinessAssumption(
+        business_id=biz2.id,
+        monthly_units_sold=Decimal("500"),
+        selling_price_per_unit=Decimal("20"),
+        variable_cost_per_unit=Decimal("10"),
+        monthly_fixed_cost=Decimal("2000"),
+        available_margin_capital=Decimal("0"),
+    )
+    db_session.add(a2)
+    db_session.commit()
+
+    decision2 = evaluate_business_decision(biz2.id, db_session)
+    assert decision2.decision != "OUT_OF_SCOPE"
+
+
+def test_30_decision_service_canonical_assumption_summary(db_session):
+    """Test 30: Decision service uses canonical assumption fields and None for missing fields."""
+    user = User(id="user_test_30", name="Geeta", available_capital=Decimal("10000.00"))
+    db_session.add(user)
+    db_session.commit()
+
+    biz = Business(id="biz_test_30", user_id=user.id, business_name="Tailoring", business_category="Apparel")
+    db_session.add(biz)
+    db_session.commit()
+
+    a = BusinessAssumption(
+        business_id=biz.id,
+        selling_price_per_unit=Decimal("150"),
+        variable_cost_per_unit=Decimal("60"),
+        # monthly_units_sold and monthly_fixed_cost are omitted
+    )
+    db_session.add(a)
+    db_session.commit()
+
+    dec = evaluate_business_decision(biz.id, db_session)
+    assert "selling_price_per_unit" in dec.assumptions_summary
+    assert dec.assumptions_summary["selling_price_per_unit"] == 150.0
+    assert dec.assumptions_summary["monthly_units_sold"] is None
+    assert dec.assumptions_summary["monthly_fixed_cost"] is None
+    # No deprecated fields
+    assert "selling_price" not in dec.assumptions_summary
+    assert "production_volume" not in dec.assumptions_summary
+

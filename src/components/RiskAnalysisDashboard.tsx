@@ -4,18 +4,15 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Dimensions,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
-import Svg, { Rect, Line, Polygon, Polyline, Circle, Text as SvgText } from 'react-native-svg';
 import { formatINR } from '../../engine/financeCalculator';
 import {
   generateAnalyticsSnapshot,
   type BusinessPlanInputs,
   type AnalyticsSnapshot,
-  type StressScenarioResult,
 } from '../services/businessAnalytics';
 import { ThemedView } from './themed-view';
 import { ThemedText } from './themed-text';
@@ -60,12 +57,15 @@ export interface RiskData {
     source?: string;
   }[];
   financials: {
-    monthlyRevenue: number;
-    monthlyExpenses: number;
-    loanEMI: number;
-    netCashFlow: number;
-    breakEvenRevenue: number;
-    safetyMargin: number;
+    monthlyRevenue: number | null;
+    monthlyExpenses: number | null;
+    loanEMI: number | null;
+    operatingSurplus?: number | null;
+    netCashFlow: number | null;
+    breakEvenRevenue: number | null;
+    breakEvenUnits?: number | null;
+    breakEvenStatus?: string | null;
+    safetyMargin: number | null;
   };
   scenarios: {
     name: string;
@@ -74,8 +74,11 @@ export interface RiskData {
     costChange: number;
     monthlyRevenue: number;
     monthlyExpenses: number;
-    loanEMI: number;
-    netCashFlow: number;
+    operatingSurplus?: number | null;
+    loanEMI: number | null;
+    postEmiCashFlow?: number | null;
+    netCashFlow: number | null;
+    dscr?: number | null;
     businessAffordabilityStatus?: string;
     householdAffordabilityStatus?: string;
     overallReadiness?: string;
@@ -90,13 +93,13 @@ export interface RiskData {
     actionItems: string[];
   };
   baseInputs?: {
-    pricePerUnit: number;
-    costPerUnit: number;
-    salesPerMonth: number;
-    monthlyFixed: number;
-    personalCost?: number;
-    householdEssentialExpenses?: number;
-    setupCost: number;
+    pricePerUnit: number | null;
+    costPerUnit: number | null;
+    salesPerMonth: number | null;
+    monthlyFixed: number | null;
+    personalCost?: number | null;
+    householdEssentialExpenses?: number | null;
+    setupCost: number | null;
     availableMarginCapital?: number | null;
     loanAmount?: number | null;
     interestRatePercent?: number | null;
@@ -104,8 +107,10 @@ export interface RiskData {
   };
   provenance?: {
     userProvided: string[];
+    userConfirmedEstimate?: string[];
+    governmentRule: string[] | string;
     calculations: string[];
-    governmentRule: string;
+    notProvided?: string[];
     marketData: string;
     aiExplanationOnly: boolean;
   };
@@ -118,7 +123,6 @@ interface RiskAnalysisDashboardProps {
   loading?: boolean;
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 /* ── Palette (semantic hex, readable in light & dark) ── */
 const R = {
@@ -300,7 +304,7 @@ function DeterministicMetricsSummary({ riskData }: { riskData: RiskData }) {
           <MetricCell
             label="Business DSCR"
             value={fmtInfo(m.businessDscr, n => n.toFixed(2), 'Need financing terms')}
-            tone={m.businessDscr != null && m.businessDscr >= 1.25 ? 'textSuccess' : 'textError'}
+            tone={m.businessReadiness === 'READY_FOR_FINANCE_REVIEW' ? 'textSuccess' : (m.businessReadiness ? 'textError' : 'textSecondary')}
           />
           <MetricCell
             label="Max Affordable EMI"
@@ -321,7 +325,7 @@ function DeterministicMetricsSummary({ riskData }: { riskData: RiskData }) {
           <MetricCell
             label="Household Debt Ratio"
             value={fmtInfo(m.postLoanHouseholdDebtRatio, n => `${(n * 100).toFixed(0)}%`, 'Need household data')}
-            tone={m.postLoanHouseholdDebtRatio != null && m.postLoanHouseholdDebtRatio <= 0.50 ? 'textSuccess' : 'textError'}
+            tone={m.householdReadiness === 'READY_FOR_FINANCE_REVIEW' ? 'textSuccess' : (m.householdReadiness ? 'textError' : 'textSecondary')}
           />
           <MetricCell
             label="Household Readiness"
@@ -554,9 +558,10 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
     <Section title="Financial Stress Test" subtitle="Deterministic sensitivity under demand shock and cost increase">
       <View style={styles.stressGrid}>
         {riskData.scenarios.map((s, i) => {
-          const healthy = s.netCashFlow >= 0;
+          const surplus = s.operatingSurplus ?? (s.monthlyRevenue - s.monthlyExpenses);
+          const healthySurplus = surplus >= 0;
           return (
-            <Card key={i} style={[styles.scenarioCard, { borderLeftColor: healthy ? R.green : R.red, borderLeftWidth: 3 }]}>
+            <Card key={i} style={[styles.scenarioCard, { borderLeftColor: healthySurplus ? R.green : R.red, borderLeftWidth: 3 }]}>
               <View style={styles.scenarioHeader}>
                 <ThemedText type="smallBold" themeColor="text">
                   {s.label || s.name}
@@ -568,11 +573,23 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
               <View style={styles.scenarioMetrics}>
                 <MetricPair label="Revenue" value={formatINR(s.monthlyRevenue)} />
                 <MetricPair label="Expenses" value={formatINR(s.monthlyExpenses)} />
-                <MetricPair label="EMI" value={formatINR(s.loanEMI)} />
                 <MetricPair
-                  label="Net Cash Flow"
-                  value={formatINR(s.netCashFlow)}
-                  valueTone={healthy ? 'textSuccess' : 'textError'}
+                  label="Operating Surplus (before EMI)"
+                  value={formatINR(surplus)}
+                  valueTone={healthySurplus ? 'textSuccess' : 'textError'}
+                />
+                <MetricPair
+                  label="EMI"
+                  value={s.loanEMI != null ? formatINR(s.loanEMI) : 'Need financing terms'}
+                />
+                <MetricPair
+                  label="Cash after EMI"
+                  value={s.postEmiCashFlow != null ? formatINR(s.postEmiCashFlow) : 'Need financing terms'}
+                  valueTone={
+                    s.postEmiCashFlow != null
+                      ? (s.postEmiCashFlow >= 0 ? 'textSuccess' : 'textError')
+                      : 'textSecondary'
+                  }
                 />
               </View>
               <View style={styles.scenarioBar}>
@@ -580,8 +597,8 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
                   style={[
                     styles.scenarioBarFill,
                     {
-                      width: `${Math.min(Math.abs(s.netCashFlow) / Math.max(Math.abs(riskData.financials.monthlyRevenue), 1) * 100, 100)}%`,
-                      backgroundColor: healthy ? R.green : R.red,
+                      width: `${Math.min(Math.abs(surplus) / Math.max(Math.abs(riskData.financials.monthlyRevenue ?? 1), 1) * 100, 100)}%`,
+                      backgroundColor: healthySurplus ? R.green : R.red,
                     },
                   ]}
                 />
@@ -615,56 +632,44 @@ function MetricPair({
   );
 }
 
-/* ── 6. Cash Flow Projection ── */
+/* ── 6. Monthly Cash Flow Snapshot (Deterministic) ── */
 function CashFlowSection({ riskData }: { riskData: RiskData }) {
-  const series = riskData.cashFlow ?? buildCashFlowSeries(riskData);
-
-  const W = Math.min(SCREEN_WIDTH - 64, 380);
-  const H = 140;
-  const pad = 24;
-  const innerW = W - pad * 2;
-  const innerH = H - pad * 2;
-
-  const maxVal = Math.max(...series.map((d) => Math.max(d.revenue, d.expenses)), 1000);
-  const minNet = Math.min(...series.map((d) => d.net), 0);
-  const maxNet = Math.max(...series.map((d) => d.net), 1000);
-  const netRange = maxNet - minNet || 1;
-
-  const xStep = innerW / (series.length - 1);
-  const revPoints = series
-    .map((d, i) => `${pad + i * xStep},${pad + innerH - (d.revenue / maxVal) * innerH}`)
-    .join(' ');
-  const expPoints = series
-    .map((d, i) => `${pad + i * xStep},${pad + innerH - (d.expenses / maxVal) * innerH}`)
-    .join(' ');
-  const netPoints = series
-    .map((d, i) => `${pad + i * xStep},${pad + innerH - ((d.net - minNet) / netRange) * innerH}`)
-    .join(' ');
+  const f = riskData.financials;
+  const rev = f.monthlyRevenue;
+  const exp = f.monthlyExpenses;
+  const surplus = f.operatingSurplus ?? (rev != null && exp != null ? rev - exp : null);
+  const emi = f.loanEMI;
+  const cashAfterEmi = emi != null && surplus != null ? surplus - emi : null;
 
   return (
-    <Section title="Cash Flow Projection" subtitle="12-month projection based on confirmed unit economics">
+    <Section title="Monthly Cash Flow Snapshot" subtitle="Deterministic view of monthly revenue, operating costs, and debt service">
       <Card>
-        <Svg width={W} height={H}>
-          <Line x1={pad} y1={H - pad} x2={W - pad} y2={H - pad} stroke="rgba(150,150,150,0.3)" strokeWidth={1} />
-          <Polyline points={revPoints} fill="none" stroke={R.green} strokeWidth={2} />
-          <Polyline points={expPoints} fill="none" stroke={R.red} strokeWidth={2} strokeDasharray="4,4" />
-          <Polyline points={netPoints} fill="none" stroke={R.amber} strokeWidth={2} />
-
-          {series.map((d, i) => (
-            <Circle
-              key={i}
-              cx={pad + i * xStep}
-              cy={pad + innerH - ((d.net - minNet) / netRange) * innerH}
-              r={2.5}
-              fill={R.amber}
-            />
-          ))}
-        </Svg>
-
-        <View style={styles.chartLegend}>
-          <LegendDot color={R.green} label="Revenue" />
-          <LegendDot color={R.red} label="Expenses" dashed />
-          <LegendDot color={R.amber} label="Net" />
+        <View style={styles.metricsGrid}>
+          <MetricCell
+            label="Monthly Revenue"
+            value={rev != null ? formatINR(rev) : 'Need more information'}
+            tone={rev != null && rev > 0 ? 'textSuccess' : 'textSecondary'}
+          />
+          <MetricCell
+            label="Operating Expenses"
+            value={exp != null ? formatINR(exp) : 'Need more information'}
+            tone="textSecondary"
+          />
+          <MetricCell
+            label="Operating Surplus (before EMI)"
+            value={surplus != null ? formatINR(surplus) : 'Need more information'}
+            tone={surplus != null ? (surplus > 0 ? 'textSuccess' : 'textError') : 'textSecondary'}
+          />
+          <MetricCell
+            label="Candidate EMI"
+            value={emi != null ? formatINR(emi) : 'Need financing terms'}
+            tone="textSecondary"
+          />
+          <MetricCell
+            label="Cash after EMI"
+            value={cashAfterEmi != null ? formatINR(cashAfterEmi) : 'Need financing terms'}
+            tone={cashAfterEmi != null ? (cashAfterEmi >= 0 ? 'textSuccess' : 'textError') : 'textSecondary'}
+          />
         </View>
       </Card>
     </Section>
@@ -675,47 +680,84 @@ function CashFlowSection({ riskData }: { riskData: RiskData }) {
 function BreakEvenSection({ riskData }: { riskData: RiskData }) {
   const f = riskData.financials;
   const breakEven = f.breakEvenRevenue;
+  const breakEvenUnits = f.breakEvenUnits ?? riskData.deterministicMetrics?.breakEvenUnits ?? null;
+  const status = f.breakEvenStatus || (breakEven != null ? 'VIABLE' : 'INSUFFICIENT');
   const actual = f.monthlyRevenue;
-  const safe = actual >= breakEven;
-  const ratio = breakEven > 0 ? actual / breakEven : 0;
-  const max = Math.max(breakEven, actual) * 1.25 || 1;
 
-  const actualPct = Math.min((actual / max) * 100, 100);
-  const bePct = Math.min((breakEven / max) * 100, 100);
+  let breakEvenText = 'Need more information';
+  let breakEvenTone: ThemeColor = 'textSecondary';
+  let isViable = false;
+
+  if (status === 'VIABLE' && breakEven != null && breakEvenUnits != null) {
+    breakEvenText = `${formatINR(breakEven)} (${breakEvenUnits.toLocaleString('en-IN')} units)`;
+    breakEvenTone = 'textSuccess';
+    isViable = true;
+  } else if (status === 'NO_FINITE_BREAK_EVEN') {
+    breakEvenText = 'No finite break-even';
+    breakEvenTone = 'textError';
+  } else if (status === 'STRUCTURALLY_UNVIABLE') {
+    breakEvenText = 'Current price/cost structure cannot break even';
+    breakEvenTone = 'textError';
+  } else {
+    breakEvenText = 'Need more information';
+    breakEvenTone = 'textSecondary';
+  }
+
+  const safe = isViable && actual != null && breakEven != null && actual >= breakEven;
+  const max = isViable && breakEven != null && actual != null ? Math.max(breakEven, actual) * 1.25 : 1;
+  const actualPct = isViable && actual != null ? Math.min((actual / max) * 100, 100) : 0;
+  const bePct = isViable && breakEven != null ? Math.min((breakEven / max) * 100, 100) : 0;
 
   return (
     <Section title="Break-Even Analysis" subtitle="Minimum monthly sales to cover all business costs">
       <Card>
         <View style={styles.beRow}>
-          <MetricPair label="Actual revenue" value={formatINR(actual)} />
-          <MetricPair label="Break-even revenue" value={formatINR(breakEven)} />
+          <MetricPair
+            label="Actual revenue"
+            value={actual != null ? formatINR(actual) : 'Need more information'}
+          />
+          <MetricPair
+            label="Break-even revenue"
+            value={breakEvenText}
+            valueTone={breakEvenTone}
+          />
           <MetricPair
             label="Safety margin"
-            value={formatINR(f.safetyMargin)}
+            value={isViable && f.safetyMargin != null ? formatINR(f.safetyMargin) : (isViable ? 'N/A' : 'Unviable')}
             valueTone={safe ? 'textSuccess' : 'textError'}
           />
         </View>
 
-        <View style={styles.beMeter}>
-          <View
-            style={[
-              styles.beMeterFill,
-              { width: `${actualPct}%`, backgroundColor: safe ? R.greenSoft : R.redSoft },
-            ]}
-          />
-          <View style={[styles.beMeterMark, { left: `${bePct}%` }]} />
-        </View>
-        <View style={styles.beLabels}>
-          <ThemedText type="small" themeColor="textSecondary">
-            0
-          </ThemedText>
-          <ThemedText type="smallBold" themeColor="text">
-            Break-even: {formatINR(breakEven)}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {formatINR(max)}
-          </ThemedText>
-        </View>
+        {isViable && breakEven != null ? (
+          <>
+            <View style={styles.beMeter}>
+              <View
+                style={[
+                  styles.beMeterFill,
+                  { width: `${actualPct}%`, backgroundColor: safe ? R.greenSoft : R.redSoft },
+                ]}
+              />
+              <View style={[styles.beMeterMark, { left: `${bePct}%` }]} />
+            </View>
+            <View style={styles.beLabels}>
+              <ThemedText type="small" themeColor="textSecondary">
+                0
+              </ThemedText>
+              <ThemedText type="smallBold" themeColor="text">
+                Break-even: {formatINR(breakEven)}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {formatINR(max)}
+              </ThemedText>
+            </View>
+          </>
+        ) : (
+          <View style={{ paddingVertical: 8, alignItems: 'center' }}>
+            <ThemedText type="smallBold" themeColor={breakEvenTone}>
+              {breakEvenText}
+            </ThemedText>
+          </View>
+        )}
       </Card>
     </Section>
   );
@@ -737,17 +779,56 @@ function StatPill({ label, value, positive }: { label: string; value: string; po
 /* ── 8. What-If Simulator (Sections Q & R: strictly uses FinanceEngine) ── */
 function WhatIfSimulator({ riskData }: { riskData: RiskData }) {
   const base = riskData.baseInputs;
-  const initialPrice = base?.pricePerUnit ?? 40;
-  const initialCost = base?.costPerUnit ?? 18;
-  const initialSales = base?.salesPerMonth ?? 500;
-  const initialFixed = base?.monthlyFixed ?? 4000;
-  const initialMargin = base?.availableMarginCapital ?? 10000;
 
-  const [price, setPrice] = useState(initialPrice);
-  const [cost, setCost] = useState(initialCost);
-  const [sales, setSales] = useState(initialSales);
-  const [fixed, setFixed] = useState(initialFixed);
-  const [margin, setMargin] = useState(initialMargin);
+  if (
+    base?.pricePerUnit == null ||
+    base?.costPerUnit == null ||
+    base?.salesPerMonth == null ||
+    base?.monthlyFixed == null
+  ) {
+    return (
+      <Section title="What-If Simulator" subtitle="Stress-test using the canonical Finance Engine">
+        <Card style={{ padding: Spacing.two, alignItems: 'center' }}>
+          <ThemedText type="default" themeColor="textSecondary" style={{ textAlign: 'center' }}>
+            Complete your business inputs before using What-If.
+          </ThemedText>
+        </Card>
+      </Section>
+    );
+  }
+
+  return (
+    <WhatIfSimulatorActive
+      riskData={riskData}
+      initialPrice={base.pricePerUnit}
+      initialCost={base.costPerUnit}
+      initialSales={base.salesPerMonth}
+      initialFixed={base.monthlyFixed}
+      initialMargin={base.availableMarginCapital ?? 0}
+    />
+  );
+}
+
+function WhatIfSimulatorActive({
+  riskData,
+  initialPrice,
+  initialCost,
+  initialSales,
+  initialFixed,
+  initialMargin,
+}: {
+  riskData: RiskData;
+  initialPrice: number;
+  initialCost: number;
+  initialSales: number;
+  initialFixed: number;
+  initialMargin: number;
+}) {
+  const [price, setPrice] = useState<number>(initialPrice);
+  const [cost, setCost] = useState<number>(initialCost);
+  const [sales, setSales] = useState<number>(initialSales);
+  const [fixed, setFixed] = useState<number>(initialFixed);
+  const [margin, setMargin] = useState<number>(initialMargin);
 
   const simSnapshot = useMemo(() => {
     const modifiedPlan: BusinessPlanInputs = {
@@ -761,26 +842,43 @@ function WhatIfSimulator({ riskData }: { riskData: RiskData }) {
     return generateAnalyticsSnapshot(modifiedPlan);
   }, [price, cost, sales, fixed, margin, riskData.analyticsSnapshot?.inputs]);
 
-  const rev = simSnapshot.monthlyRevenue ?? (sales * price);
-  const surplus = simSnapshot.operatingSurplus ?? (rev - (sales * cost) - fixed);
+  // Strictly consume engine values — NO UI calculations / fallbacks!
+  const revenue = simSnapshot.monthlyRevenue;
+  const surplus = simSnapshot.operatingSurplus;
   const emi = simSnapshot.candidateEmi;
   const dscr = simSnapshot.businessDscr;
   const breakEvenUnits = simSnapshot.breakEvenUnits;
   const breakEvenStatus = simSnapshot.breakEvenStatus;
-  const breakEvenRev = (breakEvenStatus === 'VIABLE' && breakEvenUnits != null) ? breakEvenUnits * price : null;
-  const isSurplusPositive = surplus > 0;
-  const meetsDscr = dscr != null && dscr >= 1.25;
+  const breakEvenRevenue = simSnapshot.breakEvenRevenue;
+  const isSurplusPositive = surplus != null && surplus > 0;
+  const isReady = simSnapshot.businessAffordabilityStatus === 'READY_FOR_FINANCE_REVIEW';
 
   return (
     <Section title="What-If Simulator" subtitle="Stress-test using the canonical Finance Engine">
       <Card>
         <View style={styles.simSummary}>
-          <StatPill label="Projected revenue" value={formatINR(rev)} positive={rev > 0} />
-          <StatPill label="Operating surplus" value={formatINR(surplus)} positive={isSurplusPositive} />
+          <StatPill
+            label="Projected revenue"
+            value={revenue != null ? formatINR(revenue) : 'Need more information'}
+            positive={revenue != null && revenue > 0}
+          />
+          <StatPill
+            label="Operating surplus"
+            value={surplus != null ? formatINR(surplus) : 'Need more information'}
+            positive={isSurplusPositive}
+          />
           <StatPill
             label="Break-even"
-            value={breakEvenStatus === 'VIABLE' && breakEvenUnits != null ? `${breakEvenUnits} units` : (breakEvenStatus || 'Unviable')}
-            positive={breakEvenStatus === 'VIABLE' && sales >= (breakEvenUnits || 0)}
+            value={
+              breakEvenStatus === 'VIABLE' && breakEvenUnits != null
+                ? `${breakEvenUnits.toLocaleString('en-IN')} units`
+                : breakEvenStatus === 'NO_FINITE_BREAK_EVEN'
+                ? 'No finite break-even'
+                : breakEvenStatus === 'STRUCTURALLY_UNVIABLE'
+                ? 'Structurally unviable'
+                : 'Need more information'
+            }
+            positive={breakEvenStatus === 'VIABLE' && breakEvenUnits != null && sales >= breakEvenUnits}
           />
         </View>
 
@@ -793,8 +891,8 @@ function WhatIfSimulator({ riskData }: { riskData: RiskData }) {
           </View>
           <View style={[styles.statPill, { flex: 1 }]}>
             <ThemedText type="small" themeColor="textSecondary">Business DSCR</ThemedText>
-            <ThemedText type="smallBold" themeColor={meetsDscr ? 'textSuccess' : 'textError'}>
-              {dscr != null ? dscr.toFixed(2) : 'N/A'}
+            <ThemedText type="smallBold" themeColor={isReady ? 'textSuccess' : (dscr != null ? 'textError' : 'textSecondary')}>
+              {dscr != null ? dscr.toFixed(2) : 'Need financing terms'}
             </ThemedText>
           </View>
         </View>
@@ -808,11 +906,11 @@ function WhatIfSimulator({ riskData }: { riskData: RiskData }) {
         <View style={[styles.simVerdict, { backgroundColor: isSurplusPositive ? R.greenSoft : R.redSoft }]}>
           <ThemedText type="smallBold" themeColor={isSurplusPositive ? 'textSuccess' : 'textError'}>
             {isSurplusPositive
-              ? (dscr != null && dscr >= 1.25 ? '✓ Structurally viable & meets DSCR threshold' : '✓ Positive operating surplus')
+              ? (isReady ? '✓ Structurally viable & meets DSCR threshold' : '✓ Positive operating surplus')
               : '✗ Operating loss at these settings'}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            Readiness: {simSnapshot.overallReadiness} · Break-even revenue {breakEvenRev ? formatINR(breakEvenRev) : 'N/A'}
+            Readiness: {simSnapshot.overallReadiness} · Break-even revenue {breakEvenRevenue != null ? formatINR(breakEvenRevenue) : 'N/A'}
           </ThemedText>
         </View>
       </Card>
@@ -927,26 +1025,51 @@ function RecommendationCard({ riskData }: { riskData: RiskData }) {
 /* ── 10. Explainability & Provenance (Section S) ── */
 function Explainability({ riskData }: { riskData: RiskData }) {
   const prov = riskData.provenance;
+  const govRuleText = Array.isArray(prov?.governmentRule)
+    ? prov.governmentRule.join(', ')
+    : prov?.governmentRule || 'SIH Scheme Guidelines (Rate, Cap, Tenure)';
+  const calcText = prov?.calculations?.length
+    ? prov.calculations.join(', ')
+    : 'Revenue, Operating Surplus, Break-even, Candidate EMI, DSCR, Stress Scenarios';
+
+  const isMarketVerified = prov?.marketData === 'VERIFIED_DATA' || riskData.marketDataStatus === 'VERIFIED_DATA';
+
   return (
     <Section title="Analysis Sources & Traceability" subtitle="Where this assessment comes from">
       <Card>
         <ThemedText type="smallBold" themeColor="text" style={{ marginBottom: 8 }}>
-          ANALYSIS SOURCES
+          ANALYSIS SOURCES & PROVENANCE
         </ThemedText>
 
         <View style={{ gap: 6, marginBottom: 12 }}>
           <ThemedText type="small" themeColor="text">
-            ✓ User provided: {prov?.userProvided?.length ? prov.userProvided.join(', ') : 'Unit pricing, sales volume, fixed costs'}
+            ✓ User provided: {prov?.userProvided?.length ? prov.userProvided.join(', ') : 'None'}
+          </ThemedText>
+          {prov?.userConfirmedEstimate && prov.userConfirmedEstimate.length > 0 ? (
+            <ThemedText type="small" themeColor="text">
+              ✓ User-confirmed estimates: {prov.userConfirmedEstimate.join(', ')}
+            </ThemedText>
+          ) : null}
+          <ThemedText type="small" themeColor="text">
+            ✓ Government rule: {govRuleText}
           </ThemedText>
           <ThemedText type="small" themeColor="text">
-            ✓ AARTHIKA calculation: Revenue, Operating Surplus, Break-even, Candidate EMI, DSCR, Stress Scenarios
+            ✓ AARTHIKA calculation: {calcText}
           </ThemedText>
-          <ThemedText type="small" themeColor="text">
-            ✓ Government rule: {prov?.governmentRule || 'SIH Scheme Guidelines (Rate, Cap, Tenure)'}
-          </ThemedText>
-          <ThemedText type="small" style={{ color: '#D97706', fontWeight: '600' }}>
-            ⚠ Market data: No verified local market data available (requires on-ground validation)
-          </ThemedText>
+          {prov?.notProvided && prov.notProvided.length > 0 ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              ○ Not provided: {prov.notProvided.join(', ')}
+            </ThemedText>
+          ) : null}
+          {isMarketVerified ? (
+            <ThemedText type="small" themeColor="textSuccess" style={{ fontWeight: '600' }}>
+              ✓ Market data: Verified external market/government evidence included
+            </ThemedText>
+          ) : (
+            <ThemedText type="small" style={{ color: '#D97706', fontWeight: '600' }}>
+              ⚠ Market data: No verified local market data available (requires on-ground validation)
+            </ThemedText>
+          )}
           <ThemedText type="small" themeColor="textSecondary">
             ✓ AI explanation: Explanation only — no financial calculations
           </ThemedText>
@@ -978,32 +1101,7 @@ function severityThemeColor(s: string): ThemeColor {
   }
 }
 
-function buildCashFlowSeries(riskData: RiskData): { month: string; revenue: number; expenses: number; net: number }[] {
-  const f = riskData.financials;
-  const months = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11', 'M12'];
-  return months.map((month) => ({
-    month,
-    revenue: f.monthlyRevenue,
-    expenses: f.monthlyExpenses + f.loanEMI,
-    net: f.monthlyRevenue - (f.monthlyExpenses + f.loanEMI),
-  }));
-}
 
-function LegendDot({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
-  return (
-    <View style={styles.legendItem}>
-      <View
-        style={[
-          styles.legendDot,
-          { backgroundColor: dashed ? 'transparent' : color, borderColor: color, borderWidth: dashed ? 1 : 0 },
-        ]}
-      />
-      <ThemedText type="small" themeColor="textSecondary">
-        {label}
-      </ThemedText>
-    </View>
-  );
-}
 
 /* ────────────────────────────────────────────────────────────
  *  Styles

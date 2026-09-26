@@ -72,6 +72,35 @@ def _load_policy() -> Dict[str, Any]:
         return json.load(f)
 
 
+def is_verified_market_evidence(e: Evidence) -> bool:
+    """
+    Check if an Evidence record counts as verified local market data.
+    - Excludes MOCK_DEMO, ESTIMATED, LEGACY_UNKNOWN.
+    - Excludes USER_ENTERED (which is user-provided, not verified market data).
+    - Source must be GOVERNMENT, MARKET_PROVIDER, or PILOT_OBSERVED.
+    - Evidence type must be MARKET_PRICE, DISTRICT_STATISTIC, WEATHER_OBSERVATION, or WEATHER_WARNING.
+    - Excludes generic BUSINESS_CONTEXT.
+    """
+    source_type = getattr(e, "source_type", None)
+    if hasattr(source_type, "value"):
+        source_type = source_type.value
+    if source_type in ("MOCK_DEMO", "ESTIMATED", "LEGACY_UNKNOWN", "USER_ENTERED", None):
+        return False
+
+    valid_sources = {"GOVERNMENT", "MARKET_PROVIDER", "PILOT_OBSERVED"}
+    if source_type not in valid_sources:
+        return False
+
+    ev_type = getattr(e, "evidence_type", None)
+    if hasattr(ev_type, "value"):
+        ev_type = ev_type.value
+    valid_ev_types = {"MARKET_PRICE", "DISTRICT_STATISTIC", "WEATHER_OBSERVATION", "WEATHER_WARNING"}
+    if ev_type not in valid_ev_types:
+        return False
+
+    return True
+
+
 @router.post("/generate-report", response_model=ReportResponse)
 async def generate_business_report(
     request: ReportRequest,
@@ -240,10 +269,26 @@ async def generate_business_report(
 
     # 10. Check evidence and compute provenance
     evidence_rows = db.query(Evidence).filter(Evidence.business_id == business.id).all()
-    evidence_count = len(evidence_rows)
-    market_data_status = "VERIFIED_DATA" if evidence_count > 0 else "NO_VERIFIED_DATA"
+    verified_rows = [e for e in evidence_rows if is_verified_market_evidence(e)]
+    user_entered_rows = [e for e in evidence_rows if getattr(e, "source_type", None) == "USER_ENTERED"]
+
+    if len(verified_rows) > 0:
+        market_data_status = "VERIFIED_DATA"
+    elif len(user_entered_rows) > 0:
+        market_data_status = "USER_PROVIDED_ONLY"
+    else:
+        market_data_status = "NO_VERIFIED_DATA"
+
+    evidence_count = len(verified_rows)
     evidence_used = [
-        {"id": e.id, "source": e.source_name or e.source, "metric": e.metric_name}
+        {
+            "id": e.id,
+            "source": e.source_name or e.source,
+            "metric": e.metric_name,
+            "source_type": getattr(e, "source_type", None),
+            "evidence_type": getattr(e, "evidence_type", None),
+            "is_verified": is_verified_market_evidence(e),
+        }
         for e in evidence_rows
     ]
 
@@ -278,12 +323,23 @@ async def generate_business_report(
         surplus = deterministic_snapshot.get("monthly_operating_surplus")
         dscr = deterministic_snapshot.get("business_dscr")
         readiness = deterministic_snapshot.get("overall_readiness") or "INCOMPLETE"
+
+        surplus_str = f"₹{surplus:,.0f}/month" if surplus is not None else "Needs more information"
+        dscr_str = f"{dscr:.2f}" if dscr is not None else "Need financing terms"
+
+        summary_text = (
+            f"Deterministic assessment complete: Business operating surplus is {surplus_str} with readiness status {readiness}."
+            if surplus is not None
+            else f"Deterministic assessment in progress: Core unit economics need more information (Status: {readiness})."
+        )
+        findings_text = f"Business DSCR: {dscr_str}. Operating surplus: {surplus_str}."
+
         rec = {
-            "summary": f"Deterministic assessment complete: Business operating surplus is ₹{surplus or 0:,.0f}/month with status {readiness}.",
-            "deterministic_findings_explained": f"Business DSCR is {f'{dscr:.2f}' if dscr else 'N/A'}. Operating surplus is ₹{surplus or 0:,.0f}.",
+            "summary": summary_text,
+            "deterministic_findings_explained": findings_text,
             "caveats": [
                 "Local market demand and competitor pricing have not been verified on-ground."
-                if market_data_status == "NO_VERIFIED_DATA" else "Based on verified evidence."
+                if market_data_status in ("NO_VERIFIED_DATA", "USER_PROVIDED_ONLY") else "Based on verified evidence."
             ],
             "questions_to_validate": [
                 "Confirm monthly customer footfall and sales demand on-ground.",

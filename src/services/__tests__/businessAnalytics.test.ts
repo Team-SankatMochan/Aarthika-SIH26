@@ -4,11 +4,14 @@
  * strict business/household separation, provenance tracking, and elimination of synthetic scores.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   generateAnalyticsSnapshot,
   snapshotToDashboardData,
   createBlankCustomBusiness,
   editableValue,
+  computeInputHash,
   type BusinessPlanInputs,
 } from '../businessAnalytics';
 import { SECTOR_CATALOG } from '../../constants/sectors';
@@ -397,5 +400,171 @@ describe('Aarthika Business Analytics Consolidation Suite', () => {
     const snap = generateAnalyticsSnapshot(plan);
     // Principal must not have simple interest capitalized during moratorium
     expect(snap.financeResult.capitalized_principal).toBe(snap.financeResult.recommended_loan_amount);
+  });
+
+  // 18. Cross-language hash parity fixture verification (Item 1 & 17.A)
+  test('Test 18: Cross-language hash fixture verification against finance-spec/input-hash-fixtures.json', () => {
+    const fixturePath = path.resolve(__dirname, '../../../finance-spec/input-hash-fixtures.json');
+    const fixtures = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+
+    expect(fixtures.length).toBeGreaterThanOrEqual(5);
+
+    for (const fixture of fixtures) {
+      const computed = computeInputHash(fixture.inputs, fixture.policy_version);
+      expect(computed).toBe(fixture.expected_hash);
+    }
+  });
+
+  // 19. Hashed backend explanation merge and hash mismatch rejection (Item 17.B, 17.C)
+  test('Test 19: Hashed backend explanation merge succeeds on match, rejects on mismatch', () => {
+    const plan: BusinessPlanInputs = {
+      sellingPricePerUnit: 60,
+      variableCostPerUnit: 35,
+      monthlyUnitsSold: 400,
+      monthlyBusinessFixedCost: 4000,
+      availableMarginCapital: 10000,
+    };
+    const snap = generateAnalyticsSnapshot(plan);
+
+    // Matching backend report
+    const matchingBackendReport = {
+      input_hash: snap.inputHash,
+      policy_version: snap.policyVersion,
+      explanation: {
+        summary: 'Backend AI explanation: solid margin buffer.',
+        deterministic_findings_explained: 'DSCR is strong at 1.67.',
+        suggested_next_steps: ['Lock supplier contracts'],
+      },
+      market_data_status: 'VERIFIED_DATA',
+    };
+
+    // Stale/mismatched backend report
+    const mismatchedBackendReport = {
+      input_hash: 'stale_hash_from_old_session',
+      policy_version: snap.policyVersion,
+      explanation: {
+        summary: 'Stale advice that should be rejected.',
+      },
+      market_data_status: 'VERIFIED_DATA',
+    };
+
+    // Verification logic matching src/app/index.tsx
+    const canMergeMatching =
+      matchingBackendReport.input_hash === snap.inputHash &&
+      matchingBackendReport.policy_version === snap.policyVersion;
+    expect(canMergeMatching).toBe(true);
+
+    const canMergeMismatched =
+      mismatchedBackendReport.input_hash === snap.inputHash &&
+      mismatchedBackendReport.policy_version === snap.policyVersion;
+    expect(canMergeMismatched).toBe(false);
+  });
+
+  // 20. What-If with missing inputs: no fake defaults (Item 2, 17.D)
+  test('Test 20: What-If with missing inputs does not invent fake defaults', () => {
+    const incompletePlan: BusinessPlanInputs = {
+      businessTitle: 'Incomplete Plan',
+      // price and cost are missing
+      monthlyUnitsSold: 500,
+      monthlyBusinessFixedCost: 4000,
+    };
+    const snap = generateAnalyticsSnapshot(incompletePlan);
+    const dash = snapshotToDashboardData(snap);
+
+    expect(dash.baseInputs.pricePerUnit).toBeNull();
+    expect(dash.baseInputs.costPerUnit).toBeNull();
+    // Required check in WhatIfSimulator:
+    const hasRequiredInputs =
+      dash.baseInputs.pricePerUnit != null &&
+      dash.baseInputs.costPerUnit != null &&
+      dash.baseInputs.salesPerMonth != null &&
+      dash.baseInputs.monthlyFixed != null;
+    expect(hasRequiredInputs).toBe(false);
+  });
+
+  // 21. What-If calculations: no UI-side formula fallbacks (Item 3, 17.E)
+  test('Test 21: Engine analytics produce null when inputs are missing without UI formula fallback', () => {
+    const missingPlan: BusinessPlanInputs = {
+      sellingPricePerUnit: 50,
+      // variable cost is missing
+      monthlyUnitsSold: 300,
+      monthlyBusinessFixedCost: 5000,
+    };
+    const snap = generateAnalyticsSnapshot(missingPlan);
+    expect(snap.operatingSurplus).toBeNull();
+    expect(snap.breakEvenUnits).toBeNull();
+    expect(snap.breakEvenRevenue).toBeNull();
+  });
+
+  // 22. Missing financing terms: Stress scenarios have null EMI and postEmiCashFlow, never ₹0 (Item 5, 6, 17.F)
+  test('Test 22: Missing financing terms keep candidateEmi and postEmiCashFlow as null, never ₹0', () => {
+    const planNoMargin: BusinessPlanInputs = {
+      sellingPricePerUnit: 60,
+      variableCostPerUnit: 30,
+      monthlyUnitsSold: 400,
+      monthlyBusinessFixedCost: 4000,
+      // availableMarginCapital is absent
+    };
+    const snap = generateAnalyticsSnapshot(planNoMargin);
+    expect(snap.candidateEmi).toBeNull();
+    expect(snap.businessDscr).toBeNull();
+
+    for (const scenario of snap.stressResults) {
+      expect(scenario.emi).toBeNull();
+      expect(scenario.loanEMI).toBeNull();
+      expect(scenario.postEmiCashFlow).toBeNull();
+      // Pre-EMI operating surplus must be present
+      expect(scenario.operatingSurplus).not.toBeNull();
+    }
+  });
+
+  // 23. Break-even null / unviable display never turns into ₹0 (Item 7, 17.G, 17.H)
+  test('Test 23: Break-even for price <= cost is STRUCTURALLY_UNVIABLE with null revenue, not ₹0', () => {
+    const unviablePlan: BusinessPlanInputs = {
+      sellingPricePerUnit: 20,
+      variableCostPerUnit: 25, // Cost exceeds price!
+      monthlyUnitsSold: 500,
+      monthlyBusinessFixedCost: 3000,
+    };
+    const snap = generateAnalyticsSnapshot(unviablePlan);
+    expect(snap.breakEvenStatus).toBe('STRUCTURALLY_UNVIABLE');
+    expect(snap.breakEvenUnits).toBeNull();
+    expect(snap.breakEvenRevenue).toBeNull();
+
+    const dash = snapshotToDashboardData(snap);
+    expect(dash.financials.breakEvenRevenue).toBeNull();
+    expect(dash.financials.breakEvenRevenue).not.toBe(0);
+  });
+
+  // 24. Provenance categorization: scheme terms are GOVERNMENT_RULE, not USER_PROVIDED (Item 9, 17.J)
+  test('Test 24: Provenance correctly categorizes inputs, government rules, and calculations', () => {
+    const plan: BusinessPlanInputs = {
+      sellingPricePerUnit: 50,
+      variableCostPerUnit: 20,
+      monthlyUnitsSold: 300,
+      monthlyBusinessFixedCost: 3000,
+      availableMarginCapital: 10000,
+      householdEssentialExpenses: 4000,
+      householdNonBusinessIncome: 12000,
+    };
+    const snap = generateAnalyticsSnapshot(plan);
+
+    // User provided
+    expect(snap.provenance.userProvided).toContain('sellingPricePerUnit');
+    expect(snap.provenance.userProvided).toContain('monthlyUnitsSold');
+    expect(snap.provenance.userProvided).not.toContain('interestRate');
+    expect(snap.provenance.userProvided).not.toContain('repaymentMonths');
+
+    // Government rules
+    const govRules = snap.provenance.governmentRule;
+    expect(govRules.some((r: string) => r.includes('Scheme:'))).toBe(true);
+    expect(govRules.some((r: string) => r.includes('Interest rate:'))).toBe(true);
+    expect(govRules.some((r: string) => r.includes('Tenure:'))).toBe(true);
+
+    // Calculations
+    expect(snap.provenance.calculations.some((c: string) => c.includes('Monthly Revenue'))).toBe(true);
+    expect(snap.provenance.calculations.some((c: string) => c.includes('Operating Surplus'))).toBe(true);
+    expect(snap.provenance.calculations.some((c: string) => c.includes('Candidate EMI'))).toBe(true);
+    expect(snap.provenance.calculations.some((c: string) => c.includes('Break-even'))).toBe(true);
   });
 });

@@ -1,0 +1,67 @@
+[
+  {
+    "id": "case_1_standard_sih_plan",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": 500,
+      "selling_price_per_unit": 55.0,
+      "variable_cost_per_unit": 30.0,
+      "monthly_fixed_cost": 5000,
+      "available_margin_capital": 10000.0
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"available_margin_capital\":\"10000\",\"monthly_fixed_cost\":\"5000\",\"monthly_units_sold\":\"500\",\"selling_price_per_unit\":\"55\",\"variable_cost_per_unit\":\"30\"}",
+    "expected_hash": "f382241da6f7b9816db6e545e56c55e9a96303ff3bb36b23700c5fde8796cd06"
+  },
+  {
+    "id": "case_2_decimal_precision",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": 120.5,
+      "selling_price_per_unit": 45.5,
+      "variable_cost_per_unit": 20.25,
+      "monthly_fixed_cost": 3500.0
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"monthly_fixed_cost\":\"3500\",\"monthly_units_sold\":\"120.5\",\"selling_price_per_unit\":\"45.5\",\"variable_cost_per_unit\":\"20.25\"}",
+    "expected_hash": "3599b7415fd560867c5a473b4a1f2b379b59cd821b6b07bf7e12aa4100552f9e"
+  },
+  {
+    "id": "case_3_explicit_zeros",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": 0,
+      "selling_price_per_unit": 100.0,
+      "variable_cost_per_unit": 50.0,
+      "monthly_fixed_cost": 2000,
+      "existing_monthly_household_debt_payments": 0
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"existing_monthly_household_debt_payments\":\"0\",\"monthly_fixed_cost\":\"2000\",\"monthly_units_sold\":\"0\",\"selling_price_per_unit\":\"100\",\"variable_cost_per_unit\":\"50\"}",
+    "expected_hash": "4b85fd74c43f882273e2dca0dcfd2e031e746614ae588146f4d7365cc4626953"
+  },
+  {
+    "id": "case_4_household_inclusive",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": 1000,
+      "selling_price_per_unit": 80.0,
+      "variable_cost_per_unit": 40.0,
+      "monthly_fixed_cost": 12000,
+      "monthly_household_essential_expenses": 4000.0,
+      "monthly_household_nonbusiness_income": 15000.0,
+      "existing_monthly_household_debt_payments": 1500.0,
+      "available_margin_capital": 50000.0
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"available_margin_capital\":\"50000\",\"existing_monthly_household_debt_payments\":\"1500\",\"monthly_fixed_cost\":\"12000\",\"monthly_household_essential_expenses\":\"4000\",\"monthly_household_nonbusiness_income\":\"15000\",\"monthly_units_sold\":\"1000\",\"selling_price_per_unit\":\"80\",\"variable_cost_per_unit\":\"40\"}",
+    "expected_hash": "9daba9f822ac061b956936f4f8f241bd2286746c237cc39b2447d853fe535345"
+  },
+  {
+    "id": "case_5_minimal_plan",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": 250,
+      "selling_price_per_unit": 20.0,
+      "variable_cost_per_unit": 12.0
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"monthly_units_sold\":\"250\",\"selling_price_per_unit\":\"20\",\"variable_cost_per_unit\":\"12\"}",
+    "expected_hash": "e74406bc09f7e6a823dd5eb87012d287899c511457bfe357f177ddb7eb49dc93"
+  }
+]
