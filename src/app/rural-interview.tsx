@@ -65,33 +65,33 @@ export default function RuralInterviewScreen() {
       scenario: stressScenario
     };
 
-    if (inputs.monthly_units_sold !== undefined) {
+    if (inputs.monthly_units_sold !== undefined && inputs.monthly_units_sold !== null) {
       let val = Number(inputs.monthly_units_sold);
       if (stressScenario === 'DEMAND_DROP_20') val *= 0.80;
       engineInputs.monthly_units_sold = val;
     }
-    if (inputs.selling_price_per_unit !== undefined) {
+    if (inputs.selling_price_per_unit !== undefined && inputs.selling_price_per_unit !== null) {
       engineInputs.selling_price_per_unit = Number(inputs.selling_price_per_unit);
     }
-    if (inputs.variable_cost_per_unit !== undefined) {
+    if (inputs.variable_cost_per_unit !== undefined && inputs.variable_cost_per_unit !== null) {
       let val = Number(inputs.variable_cost_per_unit);
       if (stressScenario === 'RAW_MATERIAL_UP_20') val *= 1.20;
       engineInputs.variable_cost_per_unit = val;
     }
     
     // Fixed costs
-    if (inputs.monthly_rent !== undefined) engineInputs.monthly_rent = Number(inputs.monthly_rent);
-    if (inputs.monthly_labour_cost !== undefined) engineInputs.monthly_labour_cost = Number(inputs.monthly_labour_cost);
-    if (inputs.monthly_transport_cost !== undefined) engineInputs.monthly_transport_cost = Number(inputs.monthly_transport_cost);
-    if (inputs.monthly_other_fixed_cost !== undefined) engineInputs.monthly_other_fixed_cost = Number(inputs.monthly_other_fixed_cost);
+    if (inputs.monthly_rent !== undefined && inputs.monthly_rent !== null) engineInputs.monthly_rent = Number(inputs.monthly_rent);
+    if (inputs.monthly_labour_cost !== undefined && inputs.monthly_labour_cost !== null) engineInputs.monthly_labour_cost = Number(inputs.monthly_labour_cost);
+    if (inputs.monthly_transport_cost !== undefined && inputs.monthly_transport_cost !== null) engineInputs.monthly_transport_cost = Number(inputs.monthly_transport_cost);
+    if (inputs.monthly_other_fixed_cost !== undefined && inputs.monthly_other_fixed_cost !== null) engineInputs.monthly_other_fixed_cost = Number(inputs.monthly_other_fixed_cost);
 
-    if (inputs.monthly_household_nonbusiness_income !== undefined) {
+    if (inputs.monthly_household_nonbusiness_income !== undefined && inputs.monthly_household_nonbusiness_income !== null) {
       engineInputs.monthly_household_nonbusiness_income = Number(inputs.monthly_household_nonbusiness_income);
     }
-    if (inputs.monthly_household_essential_expenses !== undefined) {
+    if (inputs.monthly_household_essential_expenses !== undefined && inputs.monthly_household_essential_expenses !== null) {
       engineInputs.monthly_household_essential_expenses = Number(inputs.monthly_household_essential_expenses);
     }
-    if (inputs.existing_monthly_household_debt_payments !== undefined) {
+    if (inputs.existing_monthly_household_debt_payments !== undefined && inputs.existing_monthly_household_debt_payments !== null) {
       engineInputs.existing_monthly_household_debt_payments = Number(inputs.existing_monthly_household_debt_payments);
     }
 
@@ -117,7 +117,6 @@ export default function RuralInterviewScreen() {
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>AARTHIKA</Text>
-          <TrustBadge source="DEMO_DATA" />
         </View>
 
         {showStructuring && inputs.available_margin_capital && (
@@ -160,7 +159,7 @@ export default function RuralInterviewScreen() {
                     monthlyRevenue={assessmentResult.monthly_revenue}
                     totalExpenses={(assessmentResult.monthly_variable_cost || 0) + (assessmentResult.monthly_fixed_cost || 0)}
                     businessCash={assessmentResult.business_cash_available_for_debt_service}
-                    breakEvenUnits={assessmentResult.break_even_units || 0}
+                    breakEvenUnits={assessmentResult.break_even_units}
                   />
                 )}
 

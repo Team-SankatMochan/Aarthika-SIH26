@@ -6,7 +6,7 @@ interface Props {
   monthlyRevenue: number;
   totalExpenses: number;
   businessCash: number;
-  breakEvenUnits: number;
+  breakEvenUnits: number | string;
 }
 
 export const RealityCheckCard: React.FC<Props> = ({ monthlyRevenue, totalExpenses, businessCash, breakEvenUnits }) => {
@@ -14,7 +14,10 @@ export const RealityCheckCard: React.FC<Props> = ({ monthlyRevenue, totalExpense
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>बिज़नेस की असली स्थिति (Reality Check)</Text>
-        <TouchableOpacity onPress={() => speak(`आपकी अनुमानित मासिक बिक्री ${monthlyRevenue} रुपये है। खर्च निकालने के बाद EMI से पहले ${businessCash >= 0 ? businessCash : 0} रुपये बचते हैं।`, 'hi')}>
+        <TouchableOpacity onPress={() => {
+          const cashText = businessCash >= 0 ? `${businessCash} रुपये बचते हैं` : `${Math.abs(businessCash)} रुपये की कमी है`;
+          speak(`आपकी अनुमानित मासिक बिक्री ${monthlyRevenue} रुपये है। खर्च निकालने के बाद EMI से पहले ${cashText}।`, 'hi');
+        }}>
           <Text style={styles.speakBtn}>🔊 आसान भाषा में सुनें</Text>
         </TouchableOpacity>
       </View>
@@ -37,7 +40,7 @@ export const RealityCheckCard: React.FC<Props> = ({ monthlyRevenue, totalExpense
         </View>
         <View style={styles.statBox}>
           <Text style={styles.label}>Break-even (कम से कम बिक्री)</Text>
-          <Text style={styles.value}>{breakEvenUnits} units</Text>
+          <Text style={styles.value}>{breakEvenUnits === 'NO_FINITE_BREAK_EVEN' ? 'N/A' : `${breakEvenUnits} units`}</Text>
         </View>
       </View>
     </View>

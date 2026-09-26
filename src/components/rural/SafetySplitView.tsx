@@ -21,8 +21,16 @@ export const SafetySplitView: React.FC<Props> = ({ businessSafety, familySafety 
   const fam = getStatus(familySafety);
 
   const handleSpeak = () => {
-    let bizText = biz.text.includes('प्रबंधनीय') ? 'व्यवसाय EMI संभाल सकता है' : 'व्यवसाय पर EMI का दबाव पड़ सकता है';
-    let famText = fam.text.includes('प्रबंधनीय') ? 'और घर के खर्च आराम से चल सकते हैं।' : 'और घर के बजट पर दबाव पड़ सकता है।';
+    let bizText = '';
+    if (biz.text.includes('प्रबंधनीय')) bizText = 'व्यवसाय EMI संभाल सकता है';
+    else if (biz.text.includes('अधिक जानकारी')) bizText = 'व्यवसाय के बारे में अधिक जानकारी चाहिए';
+    else bizText = 'व्यवसाय पर EMI का दबाव पड़ सकता है';
+
+    let famText = '';
+    if (fam.text.includes('प्रबंधनीय')) famText = 'और घर के खर्च आराम से चल सकते हैं।';
+    else if (fam.text.includes('अधिक जानकारी')) famText = 'और परिवार के खर्च के बारे में अधिक जानकारी चाहिए।';
+    else famText = 'और घर के बजट पर दबाव पड़ सकता है।';
+    
     speak(`${bizText}, ${famText}`, 'hi');
   };
 

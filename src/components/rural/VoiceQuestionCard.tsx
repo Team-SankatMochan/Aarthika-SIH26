@@ -83,9 +83,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
         }
       },
       onEnd: () => {
-        if (uiState !== 'RESULT') {
-          setUiState('IDLE');
-        }
+        setUiState(prev => prev !== 'RESULT' ? 'IDLE' : 'RESULT');
       },
       onError: (err) => {
         setUiState('IDLE');
