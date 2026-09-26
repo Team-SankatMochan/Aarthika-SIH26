@@ -1,9 +1,11 @@
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
-
+import os
+from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 
-api_key = "your_api_key_here"
+load_dotenv()
+api_key = os.getenv("GROQ_API_KEY")
 
 # Likely model names for Sept 2026
 models_to_try = [

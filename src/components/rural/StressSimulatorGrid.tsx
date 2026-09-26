@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { speak } from '../../services/tts';
 
 interface Props {
   onStress?: (scenario: string | null) => void;
@@ -22,9 +23,19 @@ export const StressSimulatorGrid: React.FC<Props> = ({ onStress, baselineResult,
       
       {currentScenario && baselineResult && stressResult && (
         <View style={styles.comparisonBox}>
-           <Text style={styles.comparisonTitle}>
-             {currentScenario === 'DEMAND_DROP_20' ? 'SALES -20%' : 'MATERIAL +20%'} IMPACT
-           </Text>
+           <View style={styles.compHeaderRow}>
+             <Text style={styles.comparisonTitle}>
+               {currentScenario === 'DEMAND_DROP_20' ? 'SALES -20%' : 'MATERIAL +20%'} IMPACT
+             </Text>
+             <TouchableOpacity onPress={() => {
+               const condition = currentScenario === 'DEMAND_DROP_20' ? 'बिक्री 20 प्रतिशत कम होती है' : 'सामान 20 प्रतिशत महंगा होता है';
+               const base = baselineResult.business_cash_available_for_debt_service || 0;
+               const stressed = stressResult.business_cash_available_for_debt_service || 0;
+               speak(`अगर ${condition}, तो EMI से पहले बचने वाली राशि ${base} रुपये से घटकर ${stressed} रुपये हो जाती है।`, 'hi');
+             }}>
+               <Text style={styles.speakBtn}>🔊 आसान भाषा में सुनें</Text>
+             </TouchableOpacity>
+           </View>
            <Text style={styles.compRow}>NORMAL: ₹{baselineResult.business_cash_available_for_debt_service?.toLocaleString('en-IN') || 0} remaining</Text>
            <Text style={styles.compRow}>STRESS: ₹{stressResult.business_cash_available_for_debt_service?.toLocaleString('en-IN') || 0} remaining</Text>
            <Text style={styles.compRow}>EMI: ₹{baselineResult.emi?.toLocaleString('en-IN') || 0}</Text>
@@ -80,7 +91,9 @@ const styles = StyleSheet.create({
   disabledText: { color: '#999' },
   comingSoon: { fontSize: 10, color: '#f57c00', marginTop: 5, fontWeight: 'bold' },
   comparisonBox: { backgroundColor: '#fdf3e8', padding: 15, borderRadius: 10, marginBottom: 20, borderWidth: 1, borderColor: '#f4a261' },
-  comparisonTitle: { fontSize: 14, fontWeight: 'bold', color: '#ba1a1a', marginBottom: 10, textAlign: 'center' },
+  compHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
+  comparisonTitle: { fontSize: 14, fontWeight: 'bold', color: '#ba1a1a', flex: 1 },
+  speakBtn: { fontSize: 12, backgroundColor: '#f0f0f0', padding: 6, borderRadius: 8, color: '#333' },
   compRow: { fontSize: 14, color: '#444', marginBottom: 4 },
   compRowBold: { fontSize: 15, fontWeight: 'bold', color: '#333', marginTop: 8, marginBottom: 15 },
   resetBtn: { backgroundColor: '#3f6653', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },

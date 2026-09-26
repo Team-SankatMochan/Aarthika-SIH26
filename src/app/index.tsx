@@ -162,7 +162,7 @@ export default function App() {
   const [currentLang, setCurrentLang] = useState('en');
   // eslint-disable-next-line react-hooks/immutability
   _tGlobal.currentLang = currentLang;
-  const [currentScreen, setCurrentScreen] = useState('signup');
+  const [currentScreen, setCurrentScreen] = useState('home');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState({
     fullName: '',

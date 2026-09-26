@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { speak } from '../../services/tts';
 
 interface Props {
   businessSafety: string;
@@ -19,9 +20,20 @@ export const SafetySplitView: React.FC<Props> = ({ businessSafety, familySafety 
   const biz = getStatus(businessSafety);
   const fam = getStatus(familySafety);
 
+  const handleSpeak = () => {
+    let bizText = biz.text.includes('प्रबंधनीय') ? 'व्यवसाय EMI संभाल सकता है' : 'व्यवसाय पर EMI का दबाव पड़ सकता है';
+    let famText = fam.text.includes('प्रबंधनीय') ? 'और घर के खर्च आराम से चल सकते हैं।' : 'और घर के बजट पर दबाव पड़ सकता है।';
+    speak(`${bizText}, ${famText}`, 'hi');
+  };
+
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>सुरक्षा जांच</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>सुरक्षा जांच</Text>
+        <TouchableOpacity onPress={handleSpeak}>
+          <Text style={styles.speakBtn}>🔊 आसान भाषा में सुनें</Text>
+        </TouchableOpacity>
+      </View>
       
       <View style={styles.splitContainer}>
         <View style={styles.half}>
@@ -48,7 +60,9 @@ export const SafetySplitView: React.FC<Props> = ({ businessSafety, familySafety 
 
 const styles = StyleSheet.create({
   card: { padding: 20, backgroundColor: '#fff', borderRadius: 16, marginVertical: 10, elevation: 2 },
-  title: { fontSize: 18, fontWeight: 'bold', color: '#8e4e14', marginBottom: 15 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
+  title: { fontSize: 18, fontWeight: 'bold', color: '#8e4e14', flex: 1 },
+  speakBtn: { fontSize: 12, backgroundColor: '#f0f0f0', padding: 6, borderRadius: 8, color: '#333' },
   splitContainer: { flexDirection: 'row', justifyContent: 'space-between' },
   half: { flex: 1, paddingRight: 10 },
   divider: { width: 2, backgroundColor: '#eee', marginHorizontal: 10 },

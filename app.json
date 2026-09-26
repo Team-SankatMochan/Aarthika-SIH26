@@ -38,7 +38,6 @@
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "1.9.25",
             "packagingOptions": {
               "pickFirst": [
                 "**/libc++_shared.so"
@@ -46,10 +45,17 @@
             }
           }
         }
-      ]
+      ],
+      "expo-speech-recognition"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "98d4dca6-22b5-4acb-affc-a4cc62ff1c24"
+      }
     }
   }
 }

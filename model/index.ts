@@ -28,7 +28,7 @@ try {
     adapter = new SQLiteAdapter({
         schema,
         migrations,
-        jsi: false, // JSI requires newArchEnabled=true; disabled to avoid initializeJSI crash
+        jsi: true,
         onSetUpError: (error) => {
             console.error('Database setup error:', error);
         },
@@ -38,7 +38,7 @@ try {
     // Create a minimal adapter without migrations as fallback
     adapter = new SQLiteAdapter({
         schema,
-        jsi: false,
+        jsi: true,
         onSetUpError: (err) => {
             console.error('Database fallback setup error:', err);
         },

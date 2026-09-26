@@ -1,0 +1,25 @@
+{
+  "cli": {
+    "version": ">= 14.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=\"-Xmx2048m\" -Dorg.gradle.workers.max=1"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=\"-Xmx2048m\" -Dorg.gradle.workers.max=1"
+      }
+    },
+    "production": {}
+  },
+  "submit": {
+    "production": {}
+  }
+}
