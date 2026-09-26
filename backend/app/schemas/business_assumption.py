@@ -34,6 +34,11 @@ class BusinessAssumptionBase(BaseModel):
     monthly_household_nonbusiness_income: Optional[Decimal] = Field(None, ge=0, examples=[5000.00])
     monthly_household_essential_expenses: Optional[Decimal] = Field(None, ge=0, examples=[2000.00])
     existing_monthly_household_debt_payments: Optional[Decimal] = Field(None, ge=0, examples=[500.00])
+
+    # --- Aggregate Financial Fields ---
+    monthly_fixed_cost: Optional[Decimal] = Field(None, ge=0, examples=[4000.00])
+    available_margin_capital: Optional[Decimal] = Field(None, ge=0, examples=[25000.00])
+    project_cost: Optional[Decimal] = Field(None, ge=0, examples=[95000.00])
     
     assumption_source: str = Field(default="ENTREPRENEUR", examples=["ENTREPRENEUR", "AI_BENCHMARK", "PILOT_DERIVED"])
     confidence: Decimal = Field(default=Decimal("0.70"), ge=0, le=1, examples=[0.75])

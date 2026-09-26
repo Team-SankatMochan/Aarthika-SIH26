@@ -6,19 +6,27 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class DecisionBase(BaseModel):
     business_id: str = Field(..., max_length=64)
-    decision: str = Field(..., examples=["GO", "MODIFY", "DO_NOT_INVEST_YET"])
-    rationale: str = Field(..., min_length=10, examples=["Business demonstrates positive unit economics with 1.8x DSCR under standard crash test."])
-    confidence: Decimal = Field(default=Decimal("0.80"), ge=0, le=1, examples=[0.85])
+    decision: str = Field(..., examples=["READY_FOR_FINANCE_REVIEW", "HIGH_RISK", "TEST_FIRST", "MODIFY", "INCOMPLETE", "INSUFFICIENT_DATA"])
+    rationale: str = Field(..., min_length=5, examples=["Business demonstrates positive unit economics with DSCR >= 1.25 under standard stress test."])
+    confidence: Optional[Decimal] = Field(default=None, ge=0, le=1, examples=[0.85])
     evidence_summary: Optional[Dict[str, Any]] = Field(default_factory=dict)
     assumptions_summary: Optional[Dict[str, Any]] = Field(default_factory=dict)
     financial_risk_summary: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_decision_enum(self):
-        valid = {"GO", "MODIFY", "DO_NOT_INVEST_YET"}
-        if self.decision.upper() not in valid:
+        valid = {
+            "READY_FOR_FINANCE_REVIEW",
+            "HIGH_RISK",
+            "TEST_FIRST",
+            "MODIFY",
+            "INCOMPLETE",
+            "INSUFFICIENT_DATA",
+        }
+        dec_upper = self.decision.upper()
+        if dec_upper not in valid:
             raise ValueError(f"decision must be one of: {', '.join(sorted(valid))}")
-        self.decision = self.decision.upper()
+        self.decision = dec_upper
         return self
 
 

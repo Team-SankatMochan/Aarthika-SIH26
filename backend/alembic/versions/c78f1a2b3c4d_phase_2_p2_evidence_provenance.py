@@ -20,58 +20,73 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # 1. Add canonical evidence columns
-    op.add_column('evidence', sa.Column('provider_id', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('provider_record_id', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('source_type', sa.String(length=50), nullable=True))
-    op.add_column('evidence', sa.Column('source_name', sa.String(length=300), nullable=True))
-    op.add_column('evidence', sa.Column('source_url', sa.String(length=500), nullable=True))
-    op.add_column('evidence', sa.Column('metric_name', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('numeric_value', sa.Numeric(precision=14, scale=4), nullable=True))
-    op.add_column('evidence', sa.Column('text_value', sa.Text(), nullable=True))
-    op.add_column('evidence', sa.Column('boolean_value', sa.Boolean(), nullable=True))
-    op.add_column('evidence', sa.Column('observation_date', sa.Date(), nullable=True))
-    op.add_column('evidence', sa.Column('reference_period_start', sa.Date(), nullable=True))
-    op.add_column('evidence', sa.Column('reference_period_end', sa.Date(), nullable=True))
-    op.add_column('evidence', sa.Column('retrieved_at', sa.DateTime(timezone=True), nullable=True))
-    op.add_column('evidence', sa.Column('provider_last_updated_at', sa.DateTime(timezone=True), nullable=True))
-    op.add_column('evidence', sa.Column('state', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('district', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('commodity', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('business_category', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('market_id', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('market_name', sa.String(length=200), nullable=True))
-    op.add_column('evidence', sa.Column('price_type', sa.String(length=50), nullable=True))
-    op.add_column('evidence', sa.Column('currency', sa.String(length=10), nullable=True, server_default='INR'))
-    op.add_column('evidence', sa.Column('quantity_unit', sa.String(length=20), nullable=True))
-    op.add_column('evidence', sa.Column('provider_original_unit', sa.String(length=50), nullable=True))
-    op.add_column('evidence', sa.Column('content_hash', sa.String(length=64), nullable=True))
-    op.add_column('evidence', sa.Column('derivation_type', sa.String(length=100), nullable=True))
-    op.add_column('evidence', sa.Column('derivation_version', sa.String(length=50), nullable=True))
-    op.add_column('evidence', sa.Column('parent_evidence_ids', sa.JSON(), nullable=True))
-    op.add_column('evidence', sa.Column('raw_reference', sa.JSON(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_cols = {c['name'] for c in inspector.get_columns('evidence')}
+
+    def safe_add_column(table, col):
+        if col.name not in existing_cols:
+            op.add_column(table, col)
+
+    safe_add_column('evidence', sa.Column('provider_id', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('provider_record_id', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('source_type', sa.String(length=50), nullable=True))
+    safe_add_column('evidence', sa.Column('source_name', sa.String(length=300), nullable=True))
+    safe_add_column('evidence', sa.Column('source_url', sa.String(length=500), nullable=True))
+    safe_add_column('evidence', sa.Column('metric_name', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('numeric_value', sa.Numeric(precision=14, scale=4), nullable=True))
+    safe_add_column('evidence', sa.Column('text_value', sa.Text(), nullable=True))
+    safe_add_column('evidence', sa.Column('boolean_value', sa.Boolean(), nullable=True))
+    safe_add_column('evidence', sa.Column('observation_date', sa.Date(), nullable=True))
+    safe_add_column('evidence', sa.Column('reference_period_start', sa.Date(), nullable=True))
+    safe_add_column('evidence', sa.Column('reference_period_end', sa.Date(), nullable=True))
+    safe_add_column('evidence', sa.Column('retrieved_at', sa.DateTime(timezone=True), nullable=True))
+    safe_add_column('evidence', sa.Column('provider_last_updated_at', sa.DateTime(timezone=True), nullable=True))
+    safe_add_column('evidence', sa.Column('state', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('district', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('commodity', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('business_category', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('market_id', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('market_name', sa.String(length=200), nullable=True))
+    safe_add_column('evidence', sa.Column('price_type', sa.String(length=50), nullable=True))
+    safe_add_column('evidence', sa.Column('currency', sa.String(length=10), nullable=True, server_default='INR'))
+    safe_add_column('evidence', sa.Column('quantity_unit', sa.String(length=20), nullable=True))
+    safe_add_column('evidence', sa.Column('provider_original_unit', sa.String(length=50), nullable=True))
+    safe_add_column('evidence', sa.Column('content_hash', sa.String(length=64), nullable=True))
+    safe_add_column('evidence', sa.Column('derivation_type', sa.String(length=100), nullable=True))
+    safe_add_column('evidence', sa.Column('derivation_version', sa.String(length=50), nullable=True))
+    safe_add_column('evidence', sa.Column('parent_evidence_ids', sa.JSON(), nullable=True))
+    safe_add_column('evidence', sa.Column('raw_reference', sa.JSON(), nullable=True))
 
     # 2. Relax legacy constraints so new canonical records don't require legacy fields
-    op.alter_column('evidence', 'business_id', existing_type=sa.String(length=64), nullable=True)
-    op.alter_column('evidence', 'source', existing_type=sa.String(length=150), nullable=True)
-    op.alter_column('evidence', 'description', existing_type=sa.Text(), nullable=True)
-    op.alter_column('evidence', 'confidence', existing_type=sa.Numeric(precision=5, scale=2), nullable=True)
-    op.alter_column('evidence', 'is_observed', existing_type=sa.Boolean(), nullable=True)
-    op.alter_column('evidence', 'is_estimated', existing_type=sa.Boolean(), nullable=True)
+    if bind.dialect.name == "postgresql":
+        op.alter_column('evidence', 'business_id', existing_type=sa.String(length=64), nullable=True)
+        op.alter_column('evidence', 'source', existing_type=sa.String(length=150), nullable=True)
+        op.alter_column('evidence', 'description', existing_type=sa.Text(), nullable=True)
+        op.alter_column('evidence', 'confidence', existing_type=sa.Numeric(precision=5, scale=2), nullable=True)
+        op.alter_column('evidence', 'is_observed', existing_type=sa.Boolean(), nullable=True)
+        op.alter_column('evidence', 'is_estimated', existing_type=sa.Boolean(), nullable=True)
 
     # 3. Data migration: Migrate existing legacy rows
     op.execute("UPDATE evidence SET source_type = 'LEGACY_UNKNOWN' WHERE source_type IS NULL")
     op.execute("UPDATE evidence SET numeric_value = value WHERE value IS NOT NULL AND numeric_value IS NULL")
-    op.alter_column('evidence', 'source_type', existing_type=sa.String(length=50), nullable=False)
+    if bind.dialect.name == "postgresql":
+        op.alter_column('evidence', 'source_type', existing_type=sa.String(length=50), nullable=False)
 
     # 4. Create indexes
-    op.create_index(op.f('ix_evidence_content_hash'), 'evidence', ['content_hash'], unique=False)
-    op.create_index(op.f('ix_evidence_provider_id'), 'evidence', ['provider_id'], unique=False)
-    op.create_index(op.f('ix_evidence_source_type'), 'evidence', ['source_type'], unique=False)
-    op.create_index(op.f('ix_evidence_state'), 'evidence', ['state'], unique=False)
-    op.create_index(op.f('ix_evidence_district'), 'evidence', ['district'], unique=False)
-    op.create_index(op.f('ix_evidence_commodity'), 'evidence', ['commodity'], unique=False)
-    op.create_index(op.f('ix_evidence_market_id'), 'evidence', ['market_id'], unique=False)
-    op.create_index('ix_evidence_cache_lookup', 'evidence', ['provider_id', 'evidence_type', 'commodity', 'state', 'district'], unique=False)
+    existing_indexes = {idx['name'] for idx in inspector.get_indexes('evidence')}
+    def safe_create_index(name, table, columns, unique=False):
+        if name not in existing_indexes:
+            op.create_index(name, table, columns, unique=unique)
+
+    safe_create_index(op.f('ix_evidence_content_hash'), 'evidence', ['content_hash'], unique=False)
+    safe_create_index(op.f('ix_evidence_provider_id'), 'evidence', ['provider_id'], unique=False)
+    safe_create_index(op.f('ix_evidence_source_type'), 'evidence', ['source_type'], unique=False)
+    safe_create_index(op.f('ix_evidence_state'), 'evidence', ['state'], unique=False)
+    safe_create_index(op.f('ix_evidence_district'), 'evidence', ['district'], unique=False)
+    safe_create_index(op.f('ix_evidence_commodity'), 'evidence', ['commodity'], unique=False)
+    safe_create_index(op.f('ix_evidence_market_id'), 'evidence', ['market_id'], unique=False)
+    safe_create_index('ix_evidence_cache_lookup', 'evidence', ['provider_id', 'evidence_type', 'commodity', 'state', 'district'], unique=False)
 
 
 def downgrade() -> None:

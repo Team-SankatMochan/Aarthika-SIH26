@@ -4,13 +4,17 @@ Multi-Agent RAG Pipeline using Groq and LangGraph
 This module orchestrates a unified agent for generating hyper-local
 business feasibility reports using Context Retrieval and a single highly
 optimized LLM call.
+
+STRICT CONTRACT:
+The LLM ONLY explains the deterministic financial snapshot.
+It NEVER recalculates financial numbers and NEVER invents market demand or risk scores.
 """
 
 import os
 import json
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
-from typing import TypedDict, Annotated, Sequence
+from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any, List
 from operator import add
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -33,6 +37,9 @@ class AgentState(TypedDict):
     business_category: str
     location: str
     capital: float
+    deterministic_snapshot: Dict[str, Any]
+    market_data_status: str
+    evidence_count: int
     
     retrieved_context: str
     report: UnifiedReport | None
@@ -58,16 +65,40 @@ class GroqRAGPipeline:
         self.graph = self._build_graph()
 
     def _retrieve_context(self, state: AgentState) -> dict:
-        query = f"{state['business_category']} business in {state['location']} with capital {state['capital']}"
-        # Phase 2 P2: Direct raw HTTP provider fetch removed to prevent unverified bypass.
-        # External provider context injection disabled until Phase 2 P3 Evidence-based RAG.
-        capital_float = float(state['capital']) if state['capital'] else 0.0
+        snap = state.get("deterministic_snapshot") or {}
+        market_status = state.get("market_data_status", "NO_VERIFIED_DATA")
+        evidence_count = state.get("evidence_count", 0)
+
         retrieved_context = f"""
-[BUSINESS PROFILE & FINANCIAL ESTIMATES]
+[BUSINESS PROFILE]
 - Business Category: {state['business_category']}
 - Location: {state['location']}
-- Note: External provider context injection disabled until Phase 2 P3 Evidence-based RAG.
+- Margin Capital: ₹{state['capital']}
+
+[DETERMINISTIC FINANCIAL SNAPSHOT]
+- Monthly Revenue: {snap.get('monthly_revenue', 'Missing')}
+- Monthly Variable Cost: {snap.get('monthly_variable_cost', 'Missing')}
+- Monthly Fixed Cost: {snap.get('monthly_fixed_cost', 'Missing')}
+- Monthly Operating Surplus: {snap.get('monthly_operating_surplus', 'Missing')}
+- Unit Contribution Margin: {snap.get('unit_contribution_margin', 'Missing')}
+- Break-Even Units: {snap.get('break_even_units', 'Missing')} (Status: {snap.get('break_even_status', 'Missing')})
+- Candidate EMI: {snap.get('candidate_emi', 'Missing')}
+- Business DSCR: {snap.get('business_dscr', 'Missing')}
+- Maximum Affordable EMI: {snap.get('maximum_affordable_emi', 'Missing')}
+- Affordable Loan Amount: {snap.get('affordable_loan_amount', 'Missing')}
+- Recommended Loan Amount: {snap.get('recommended_loan_amount', 'Missing')}
+- Business Affordability Status: {snap.get('business_affordability_status', 'Missing')}
+- Household Affordability Status: {snap.get('household_affordability_status', 'Missing')}
+- Overall Readiness: {snap.get('overall_readiness', 'Missing')}
+- Missing Data Fields: {snap.get('missing_fields', [])}
+- Stress Test Results: {json.dumps(snap.get('stress_results', []))}
+
+[LOCAL MARKET DATA STATUS]
+- Market Data Status: {market_status}
+- Verified Market Evidence Count: {evidence_count}
+- Note: When status is NO_VERIFIED_DATA, no on-ground evidence is available for local demand, pricing, or competitors. Emphasize field validation.
 """
+        query = f"{state['business_category']} in {state['location']}"
         return {
             "retrieved_context": retrieved_context,
             "messages": [HumanMessage(content=f"Retrieved context for {query}")]
@@ -76,19 +107,23 @@ class GroqRAGPipeline:
     def _unified_agent(self, state: AgentState) -> dict:
         system_prompt = """You are an elite Micro-Finance and MSME Credit Risk Analyst operating as an explanatory intelligence for the 'Aarthika' platform.
 
-Your task is to analyze the provided business profile, financial details, and market context to generate a purely explanatory report.
-DO NOT invent numeric risk scores, market demand levels, or GO/NO-GO investment decisions. Your role is solely to explain findings, highlight caveats, ask questions to validate, and suggest next steps.
+Your ONLY task is to EXPLAIN the provided deterministic financial snapshot.
+CRITICAL RULES:
+1. NEVER recalculate or invent financial numbers. All financial metrics (revenue, surplus, break-even, DSCR, EMI) in the snapshot are fixed, authoritative, and deterministic.
+2. DO NOT invent numeric risk scores, market demand levels ('HIGH', 'MEDIUM'), competitor counts, or GO/NO-GO investment decisions.
+3. If Market Data Status is NO_VERIFIED_DATA, you MUST explicitly state that local demand, customer footfall, and competitors have no verified data and require on-ground field validation.
+4. Your role is solely to explain findings, highlight caveats, ask questions to validate on-ground, and suggest practical next steps.
 
 CRITICAL REQUIREMENT:
-You must respond with ONLY a valid, minified JSON object. Absolutely NO markdown formatting, NO backticks (```json), NO conversational text, and NO preamble. Just the raw JSON."""
+You must respond with ONLY a valid, minified JSON object matching the schema. Absolutely NO markdown formatting, NO backticks (```json), NO conversational text, and NO preamble."""
 
-        human_prompt = """Assess risks for this business:
+        human_prompt = """Explain the deterministic assessment for this business:
 
-Business Type: {business_category}
+Business Category: {business_category}
 Location: {location}
 Available Capital: ₹{capital}
 
-Market Context:
+Context & Deterministic Assessment:
 {retrieved_context}
 """
 
@@ -155,12 +190,24 @@ Market Context:
         workflow.add_edge("unified_agent", END)
         return workflow.compile()
 
-    async def generate_report(self, business_id: str, business_category: str, location: str, capital: float) -> dict:
+    async def generate_report(
+        self,
+        business_id: str,
+        business_category: str,
+        location: str,
+        capital: float,
+        deterministic_snapshot: Dict[str, Any] | None = None,
+        market_data_status: str = "NO_VERIFIED_DATA",
+        evidence_count: int = 0,
+    ) -> dict:
         initial_state = AgentState(
             business_id=business_id,
             business_category=business_category,
             location=location,
             capital=capital,
+            deterministic_snapshot=deterministic_snapshot or {},
+            market_data_status=market_data_status,
+            evidence_count=evidence_count,
             retrieved_context="",
             report=None,
             messages=[]

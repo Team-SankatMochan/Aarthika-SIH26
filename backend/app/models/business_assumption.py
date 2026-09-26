@@ -61,6 +61,11 @@ class BusinessAssumption(Base, SyncableMixin):
     monthly_household_essential_expenses: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
     existing_monthly_household_debt_payments: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
 
+    # --- Aggregate Financial Fields ---
+    monthly_fixed_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    available_margin_capital: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    project_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+
     assumption_source: Mapped[str] = mapped_column(
         String(100), default="ENTREPRENEUR", nullable=False
     )

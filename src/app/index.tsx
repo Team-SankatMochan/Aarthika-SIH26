@@ -7,7 +7,7 @@ import React, { useState, useEffect, createContext, useContext, useRef, useCallb
 import { router } from 'expo-router';
 import { api, isBackendConfigured } from '../services/api';
 import { speak, stopSpeaking } from '../services/tts';
-import { generateAnalyticsSnapshot, snapshotToDashboardData, type BusinessPlanInputs, type AnalyticsSnapshot } from '../services/businessAnalytics';
+import { generateAnalyticsSnapshot, snapshotToDashboardData, editableValue, createBlankCustomBusiness, type BusinessPlanInputs, type AnalyticsSnapshot } from '../services/businessAnalytics';
 import { AARTHIKA_CALCULATION_POLICY, getSIHSchemeTerms } from '../engine/SIHSchemeRules';
 import { sttService } from '../services/stt';
 import { parseSpokenNumber } from '../services/numberParser';
@@ -35,8 +35,6 @@ import {
   Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Slider from '@react-native-community/slider';
-import { GoNoGoGauge } from '../../components/GoNoGoGauge';
 import { RiskAnalysisDashboard } from '../components/RiskAnalysisDashboard';
 
 
@@ -57,25 +55,22 @@ const SNAP_INTERVAL = CARD_WIDTH + 14;
 const _tGlobal: any = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : {});
 _tGlobal.AARTHIKA_TRANSLATIONS = AARTHIKA_TRANSLATIONS;
 
-// Shared helper: map in-memory activeBusiness plan to backend canonical schema.
-// Uses the backend's existing canonical fields — does NOT fabricate arbitrary splits.
+// Shared helper: map in-memory activeBusiness plan to backend canonical schema (Section H).
+// Uses the backend's canonical fields — does NOT fabricate arbitrary splits.
 function buildAssumptionsPayload(biz: any, businessId: string): Record<string, unknown> {
   return {
     business_id: businessId,
-    // Unit economics
-    selling_price: biz?.pricePerUnit ?? null,
-    production_volume: biz?.salesPerMonth ?? null,
-    raw_material_cost: biz?.costPerUnit ?? null,
-    // Monthly business fixed cost — passed as aggregate, NOT split arbitrarily
+    monthly_units_sold: biz?.salesPerMonth ?? null,
+    unit_of_measure: biz?.unitType || 'unit',
+    selling_price_per_unit: biz?.pricePerUnit ?? null,
+    variable_cost_per_unit: biz?.costPerUnit ?? null,
     monthly_fixed_cost: biz?.monthlyFixed ?? null,
-    // Household data — separate from business
-    monthly_household_essential_expenses: biz?.personalCost ?? null,
-    // Setup / project cost
-    setup_cost: biz?.setupCost ?? null,
-    // Available margin capital if user provided
     available_margin_capital: biz?.availableMarginCapital ?? null,
-    // Loan: only if user explicitly supplied, not fabricated
-    proposed_loan_amount: biz?.requestedLoanAmount ?? null,
+    project_cost: biz?.setupCost ?? null,
+    requested_loan_amount: biz?.requestedLoanAmount ?? null,
+    monthly_household_nonbusiness_income: biz?.householdIncome ?? null,
+    monthly_household_essential_expenses: biz?.householdEssentialExpenses ?? biz?.personalCost ?? null,
+    existing_monthly_household_debt_payments: biz?.existingEMI ?? null,
     assumption_source: biz?.presetSource === 'SUGGESTED_ESTIMATE' ? 'PRESET_UNCONFIRMED' : 'ENTREPRENEUR',
   };
 }
@@ -128,20 +123,11 @@ const AppContext = createContext<any>({
     interestedSector: '',
     hasExistingBusiness: '',
     profileImage: null,
+    isGuest: false,
+    backendUserId: null as string | null,
   },
   setUser: () => {},
-  activeBusiness: {
-    sector: '',
-    title: '',
-    setupCost: 0,
-    monthlyFixed: 0,
-    unitType: '',
-    pricePerUnit: 0,
-    costPerUnit: 0,
-    salesPerMonth: 0,
-    personalCost: 0,
-    breakdown: [],
-  },
+  activeBusiness: createBlankCustomBusiness(''),
   setActiveBusiness: () => {},
   activeBusinessId: null,
   setActiveBusinessId: () => {},
@@ -178,6 +164,8 @@ export default function App() {
     interestedSector: '',
     hasExistingBusiness: '',
     profileImage: null,
+    isGuest: false,
+    backendUserId: null as string | null,
   });
 
   // Hydrate persisted user on startup
@@ -191,7 +179,7 @@ export default function App() {
         }
         if (userJson) {
           const parsed = JSON.parse(userJson);
-          if (parsed && (parsed.fullName || parsed.firstName || parsed.occupation)) {
+          if (parsed && (parsed.fullName || parsed.firstName || parsed.occupation || parsed.isGuest)) {
             setUser(parsed);
             setIsAuthenticated(true);
             setCurrentScreen('home');
@@ -206,24 +194,8 @@ export default function App() {
     })();
   }, []);
 
-  const [activeBusiness, setActiveBusiness] = useState({
-    sector: '',
-    title: '',
-    setupCost: 0,
-    monthlyFixed: 0,
-    unitType: '',
-    pricePerUnit: 0,
-    costPerUnit: 0,
-    salesPerMonth: 0,
-    personalCost: 0,
-    availableMarginCapital: null as number | null,
-    householdIncome: null as number | null,
-    existingEMI: null as number | null,
-    requestedLoanAmount: null as number | null,
-    presetSource: '' as string, // 'SUGGESTED_ESTIMATE' for presets, '' for custom
-    breakdown: [] as { label: string; cost: number }[],
-  });
-  const [activeBusinessId, setActiveBusinessId] = useState(null);
+  const [activeBusiness, setActiveBusiness] = useState<any>(() => createBlankCustomBusiness(''));
+  const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [aiReport, setAiReport] = useState(null);
 
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -252,33 +224,37 @@ export default function App() {
     setCurrentScreen(screen);
   };
 
-  const saveTouchlessProfile = async (profileData: { name: string; place: string; occupation: string; age: string }) => {
-    const nameParts = (profileData.name || '').trim().split(' ');
+  // Touchless profile saving — no fake guest defaults (Section J)
+  const saveTouchlessProfile = async (profileData: { name?: string; place?: string; occupation?: string; age?: string; isGuest?: boolean }) => {
+    const isGuest = !!profileData.isGuest;
+    const rawName = (profileData.name || '').trim();
+    const nameParts = rawName ? rawName.split(' ') : [];
     const updatedUser = {
       ...user,
-      fullName: profileData.name.trim(),
-      firstName: nameParts[0] || profileData.name.trim(),
+      isGuest,
+      fullName: rawName,
+      firstName: nameParts[0] || (isGuest ? '' : rawName),
       lastName: nameParts.slice(1).join(' ') || '',
-      village: profileData.place.trim(),
-      district: profileData.place.trim(),
-      occupation: profileData.occupation.trim(),
-      age: profileData.age.toString().trim(),
-      interestedSector: profileData.occupation.trim(),
+      village: (profileData.place || '').trim(),
+      district: (profileData.place || '').trim(),
+      occupation: (profileData.occupation || '').trim(),
+      age: profileData.age ? profileData.age.toString().trim() : '',
+      interestedSector: (profileData.occupation || '').trim(),
       backendUserId: null as string | null,
     };
 
-    if (isBackendConfigured) {
+    if (isBackendConfigured && !isGuest && updatedUser.fullName) {
       try {
         const backendRes = await api.users.createUser({
           name: updatedUser.fullName,
           available_capital: 0,
-          experience: updatedUser.occupation,
-          skills: [updatedUser.occupation],
+          experience: updatedUser.occupation || undefined,
+          skills: updatedUser.occupation ? [updatedUser.occupation] : [],
           family_workforce: 1,
           preferences: {
-            place: updatedUser.village,
-            occupation: updatedUser.occupation,
-            age: updatedUser.age,
+            place: updatedUser.village || undefined,
+            occupation: updatedUser.occupation || undefined,
+            age: updatedUser.age || undefined,
           },
         });
         if (backendRes?.id) {
@@ -347,6 +323,8 @@ export default function App() {
       interestedSector: '',
       hasExistingBusiness: '',
       profileImage: null,
+      isGuest: false,
+      backendUserId: null,
     });
     try {
       AsyncStorage.removeItem('@user');
@@ -447,11 +425,7 @@ export default function App() {
             t={t}
             currentLang={currentLang}
             onTranscript={(text: string) => {
-              setActiveBusiness((prev) => ({
-                ...prev,
-                title: text,
-                sector: 'custom',
-              }));
+              setActiveBusiness(createBlankCustomBusiness(text));
               setIsVoiceActive(false);
               setCurrentScreen('business_details');
             }}
@@ -511,24 +485,8 @@ function HomeScreen() {
 
   const handleTextSubmit = () => {
     if (businessQuery.trim().length > 0) {
-      // Reset stale assumptions when starting a new custom business
-      setActiveBusiness({
-        sector: 'custom',
-        title: businessQuery,
-        setupCost: 0,
-        monthlyFixed: 0,
-        unitType: '',
-        pricePerUnit: 0,
-        costPerUnit: 0,
-        salesPerMonth: 0,
-        personalCost: 0,
-        availableMarginCapital: null,
-        householdIncome: null,
-        existingEMI: null,
-        requestedLoanAmount: null,
-        presetSource: '',
-        breakdown: [],
-      });
+      // Reset assumptions cleanly when starting a new custom business (Section B)
+      setActiveBusiness(createBlankCustomBusiness(businessQuery.trim()));
       navigateTo('business_details');
     }
   };
@@ -547,6 +505,7 @@ function HomeScreen() {
       pricePerUnit: sector.presets.pricePerUnit,
       costPerUnit: sector.presets.costPerUnit,
       salesPerMonth: sector.presets.salesPerMonth,
+      householdEssentialExpenses: sector.presets.personalCost,
       personalCost: sector.presets.personalCost,
       availableMarginCapital: null,
       householdIncome: null,
@@ -779,6 +738,7 @@ function ExploreSectorsScreen() {
       pricePerUnit: sector.presets.pricePerUnit,
       costPerUnit: sector.presets.costPerUnit,
       salesPerMonth: sector.presets.salesPerMonth,
+      householdEssentialExpenses: sector.presets.personalCost,
       personalCost: sector.presets.personalCost,
       availableMarginCapital: null,
       householdIncome: null,
@@ -800,20 +760,60 @@ function ExploreSectorsScreen() {
   );
 }
 
+function parseNumOrNull(val: string): number | null {
+  const trimmed = (val ?? '').trim();
+  if (trimmed === '') return null;
+  const num = Number(trimmed);
+  return isNaN(num) ? null : num;
+}
+
 // ----------------------------------------------------
 // BUSINESS DETAILS / EDIT DETAILS (WITH NUMERIC VOICE INPUT)
+// Canonical inputs only — zero fallback financial values (Sections A, C, D, E, F)
 // ----------------------------------------------------
 function BusinessDetailsScreen() {
   const { activeBusiness, setActiveBusiness, navigateTo, currentLang, t } = useApp();
 
-  const [setupCost, setSetupCost] = useState((activeBusiness?.setupCost || 95000).toString());
-  const [monthlyFixed, setMonthlyFixed] = useState((activeBusiness?.monthlyFixed || 4000).toString());
-  const [pricePerUnit, setPricePerUnit] = useState((activeBusiness?.pricePerUnit || 40).toString());
-  const [costPerUnit, setCostPerUnit] = useState((activeBusiness?.costPerUnit || 18).toString());
-  const [salesPerMonth, setSalesPerMonth] = useState((activeBusiness?.salesPerMonth || 1800).toString());
-  const [personalCost, setPersonalCost] = useState((activeBusiness?.personalCost || 8000).toString());
-  const [disasterImpact, setDisasterImpact] = useState(0);
-  const [isDraggingDisaster, setIsDraggingDisaster] = useState(false);
+  const isPreset = activeBusiness?.presetSource === 'SUGGESTED_ESTIMATE';
+
+  // Field provenance tracking (Section F)
+  const [fieldProvenance, setFieldProvenance] = useState<Record<string, string>>(() => {
+    const fields = [
+      'setupCost',
+      'salesPerMonth',
+      'pricePerUnit',
+      'costPerUnit',
+      'monthlyFixed',
+      'availableMarginCapital',
+      'householdEssentialExpenses',
+      'householdIncome',
+      'existingEMI',
+      'requestedLoanAmount',
+    ];
+    const initial: Record<string, string> = {};
+    for (const f of fields) {
+      initial[f] = isPreset ? 'SUGGESTED_ESTIMATE' : 'USER_PROVIDED';
+    }
+    return initial;
+  });
+
+  // State initialized using editableValue helper without ANY fallback values (Section A)
+  const [setupCost, setSetupCost] = useState(editableValue(activeBusiness?.setupCost));
+  const [monthlyFixed, setMonthlyFixed] = useState(editableValue(activeBusiness?.monthlyFixed));
+  const [pricePerUnit, setPricePerUnit] = useState(editableValue(activeBusiness?.pricePerUnit));
+  const [costPerUnit, setCostPerUnit] = useState(editableValue(activeBusiness?.costPerUnit));
+  const [salesPerMonth, setSalesPerMonth] = useState(editableValue(activeBusiness?.salesPerMonth));
+  const [availableMarginCapital, setAvailableMarginCapital] = useState(editableValue(activeBusiness?.availableMarginCapital));
+
+  // Household fields (Section D, E)
+  const [householdEssentialExpenses, setHouseholdEssentialExpenses] = useState(
+    editableValue(activeBusiness?.householdEssentialExpenses ?? activeBusiness?.personalCost)
+  );
+  const [householdIncome, setHouseholdIncome] = useState(editableValue(activeBusiness?.householdIncome));
+  const [existingEMI, setExistingEMI] = useState(editableValue(activeBusiness?.existingEMI));
+
+  // Optional requested loan (Section E)
+  const [requestedLoanAmount, setRequestedLoanAmount] = useState(editableValue(activeBusiness?.requestedLoanAmount));
 
   // Active numeric voice modal state
   const [voiceTargetField, setVoiceTargetField] = useState<{
@@ -822,27 +822,45 @@ function BusinessDetailsScreen() {
     setter: (val: string) => void;
   } | null>(null);
 
-  const numSetup = parseFloat(setupCost) || 0;
-  const numFixed = parseFloat(monthlyFixed) || 0;
-  const numPrice = parseFloat(pricePerUnit) || 0;
-  const numCost = parseFloat(costPerUnit) || 0;
-  const numSales = parseFloat(salesPerMonth) || 0;
-  const numPersonal = parseFloat(personalCost) || 0;
+  const handleFieldChange = (field: string, val: string, setter: (v: string) => void) => {
+    setter(val);
+    setFieldProvenance((prev) => ({ ...prev, [field]: 'USER_PROVIDED' }));
+  };
 
-  const monthlyRevenue = numSales * numPrice;
-  const monthlyVariableCost = numSales * numCost;
-  const disasterFactor = 1 + disasterImpact;
+  const handleDontKnow = (field: string, setter: (v: string) => void) => {
+    setter('');
+    setFieldProvenance((prev) => ({ ...prev, [field]: 'USER_PROVIDED' }));
+  };
 
-  const monthlyGrossProfit = (monthlyRevenue * (1 - disasterImpact * 0.5)) - (monthlyVariableCost * disasterFactor);
-  const monthlyNetProfit = monthlyGrossProfit - numFixed - numPersonal;
+  const numSetup = parseNumOrNull(setupCost);
+  const numFixed = parseNumOrNull(monthlyFixed);
+  const numPrice = parseNumOrNull(pricePerUnit);
+  const numCost = parseNumOrNull(costPerUnit);
+  const numSales = parseNumOrNull(salesPerMonth);
+  const numMargin = parseNumOrNull(availableMarginCapital);
+  const numHouseholdExp = parseNumOrNull(householdEssentialExpenses);
+  const numHouseholdInc = parseNumOrNull(householdIncome);
+  const numExistingEMI = parseNumOrNull(existingEMI);
+  const numLoan = parseNumOrNull(requestedLoanAmount);
 
-  const profitMargin = monthlyRevenue > 0 ? (monthlyNetProfit / monthlyRevenue) : 0;
-  let riskRatio = 0.5;
-  if (profitMargin > 0.2) riskRatio = 0.2 + disasterImpact * 0.3;
-  else if (profitMargin > 0.05) riskRatio = 0.5 + disasterImpact * 0.4;
-  else riskRatio = 0.8 + disasterImpact * 0.2;
+  // Business Operating Surplus = Revenue - Variable Costs - Fixed Business Costs
+  // Household expenses are NEVER subtracted from business operating surplus (Section D)
+  const monthlyRevenue = numSales !== null && numPrice !== null ? numSales * numPrice : null;
+  const monthlyVariableCost = numSales !== null && numCost !== null ? numSales * numCost : null;
+  const operatingSurplus =
+    monthlyRevenue !== null && monthlyVariableCost !== null && numFixed !== null
+      ? monthlyRevenue - monthlyVariableCost - numFixed
+      : null;
 
-  const handleRunRiskTest = () => {
+  const handleSaveAndViewPlan = () => {
+    // Confirm all visible unedited preset fields on save (Section F)
+    const updatedProvenance: Record<string, string> = { ...fieldProvenance };
+    for (const key of Object.keys(updatedProvenance)) {
+      if (updatedProvenance[key] === 'SUGGESTED_ESTIMATE') {
+        updatedProvenance[key] = 'USER_CONFIRMED_ESTIMATE';
+      }
+    }
+
     setActiveBusiness((prev: any) => ({
       ...prev,
       setupCost: numSetup,
@@ -850,12 +868,19 @@ function BusinessDetailsScreen() {
       pricePerUnit: numPrice,
       costPerUnit: numCost,
       salesPerMonth: numSales,
-      personalCost: numPersonal,
+      availableMarginCapital: numMargin,
+      householdEssentialExpenses: numHouseholdExp,
+      personalCost: numHouseholdExp, // keep compatibility
+      householdIncome: numHouseholdInc,
+      existingEMI: numExistingEMI,
+      requestedLoanAmount: numLoan,
+      presetSource: isPreset ? 'USER_CONFIRMED_ESTIMATE' : (prev?.presetSource || ''),
+      fieldProvenance: updatedProvenance,
     }));
     navigateTo('my_plan');
   };
 
-  const fmt = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  const fmt = (n: number | null) => (n !== null ? `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—');
 
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -864,58 +889,36 @@ function BusinessDetailsScreen() {
           {t('business_financials_title') || 'Business Financials'}
         </Text>
         <Text style={styles.screenHeaderSub}>
-          {activeBusiness?.title || 'Farming'} - {t('edit_details_sub') || 'Edit Details'}
+          {activeBusiness?.title || 'Business'} - {t('edit_details_sub') || 'Edit Details'}
         </Text>
       </View>
 
-      {/* Interactive Disaster Slider */}
-      <View style={styles.card}>
-        <Text style={styles.cardSectionTitle}>
-          {t('disaster_slider_title') || 'Interactive Disaster Slider'}
-        </Text>
-        <Text style={{ fontSize: 13, color: COLORS.onSurfaceVariant, marginBottom: 10 }}>
-          {t('disaster_slider_desc') || 'Simulate drought, pests, or market crashes to see how resilient your business is.'}
-        </Text>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ fontWeight: 'bold' }}>{t('impact_severity') || 'Impact Severity:'}</Text>
-          <Text style={{ fontWeight: 'bold', color: disasterImpact > 0.5 ? COLORS.error : COLORS.secondary }}>
-            {(disasterImpact * 100).toFixed(0)}%
+      {/* Preset estimate notification (Section F) */}
+      {isPreset && (
+        <View style={[styles.card, { backgroundColor: '#fff8e1', borderColor: '#ffe082', marginBottom: 10 }]}>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: '#f57f17' }}>
+            ⚠ {t('suggested_estimate_notice') || 'Suggested starting estimates — confirm or edit'}
+          </Text>
+          <Text style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginTop: 4 }}>
+            {t('suggested_estimate_sub') || 'Values below are sector benchmarks. Review and edit to match your reality.'}
           </Text>
         </View>
-        <Slider
-          value={disasterImpact}
-          onValueChange={setDisasterImpact}
-          onSlidingStart={() => setIsDraggingDisaster(true)}
-          onSlidingComplete={(v) => {
-            setDisasterImpact(v);
-            setIsDraggingDisaster(false);
-          }}
-          minimumValue={0}
-          maximumValue={1}
-          step={0.01}
-          minimumTrackTintColor={COLORS.error}
-          maximumTrackTintColor={COLORS.outlineVariant}
-          thumbTintColor={COLORS.primary}
-          style={{ width: '100%', height: 40 }}
-        />
-        <View style={{ alignItems: 'center', marginTop: 10 }}>
-          <GoNoGoGauge riskRatio={riskRatio} size={200} animated={!isDraggingDisaster} />
-        </View>
-      </View>
+      )}
 
-      {/* Setup Costs with Microphone Voice Input */}
+      {/* 1. SETUP COSTS & FINANCING (Section E) */}
       <View style={styles.card}>
-        <Text style={styles.cardSectionTitle}>{t('setup_costs_section') || 'Setup Costs (₹)'}</Text>
+        <Text style={styles.cardSectionTitle}>{t('setup_costs_section') || 'Setup Costs & Capital'}</Text>
+
         <View style={styles.inputContainer}>
           <View style={styles.rowBetween}>
-            <Text style={styles.inputLabel}>{t('initial_investment') || 'Initial Investment'}</Text>
+            <Text style={styles.inputLabel}>{t('initial_investment') || 'Initial Investment / Setup Cost (₹)'}</Text>
             <TouchableOpacity
               style={styles.micInputBadge}
               onPress={() =>
                 setVoiceTargetField({
                   id: 'setupCost',
                   label: t('initial_investment') || 'Initial Investment',
-                  setter: setSetupCost,
+                  setter: (val) => handleFieldChange('setupCost', val, setSetupCost),
                 })
               }
               activeOpacity={0.7}
@@ -928,29 +931,91 @@ function BusinessDetailsScreen() {
             style={styles.input}
             keyboardType="numeric"
             value={setupCost}
-            onChangeText={setSetupCost}
+            placeholder="e.g. 95000"
+            placeholderTextColor={COLORS.outline}
+            onChangeText={(val) => handleFieldChange('setupCost', val, setSetupCost)}
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.inputLabel}>{t('available_margin_capital') || 'Available Own / Margin Capital (₹)'}</Text>
+            <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+              <TouchableOpacity
+                onPress={() => handleDontKnow('availableMarginCapital', setAvailableMarginCapital)}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 11, color: COLORS.outline, textDecorationLine: 'underline' }}>
+                  {t('dont_know_yet') || "Don't know yet"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.micInputBadge}
+                onPress={() =>
+                  setVoiceTargetField({
+                    id: 'availableMarginCapital',
+                    label: t('available_margin_capital') || 'Available Margin Capital',
+                    setter: (val) => handleFieldChange('availableMarginCapital', val, setAvailableMarginCapital),
+                  })
+                }
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 13 }}>🎙️</Text>
+                <Text style={styles.micInputBadgeText}>Speak</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={availableMarginCapital}
+            placeholder="Own savings to invest (optional)"
+            placeholderTextColor={COLORS.outline}
+            onChangeText={(val) => handleFieldChange('availableMarginCapital', val, setAvailableMarginCapital)}
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.inputLabel}>{t('requested_loan_amount') || 'Requested Loan Amount (₹) [Optional]'}</Text>
+            <TouchableOpacity
+              onPress={() => handleDontKnow('requestedLoanAmount', setRequestedLoanAmount)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 11, color: COLORS.outline, textDecorationLine: 'underline' }}>
+                {t('dont_know_yet') || "Don't know yet"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={requestedLoanAmount}
+            placeholder="Leave empty to let Aarthika recommend"
+            placeholderTextColor={COLORS.outline}
+            onChangeText={(val) => handleFieldChange('requestedLoanAmount', val, setRequestedLoanAmount)}
           />
         </View>
       </View>
 
-      {/* Monthly Economics with Microphone Voice Input on Every Numeric Field */}
+      {/* 2. MONTHLY BUSINESS ECONOMICS (Sections A, D) */}
       <View style={styles.card}>
         <Text style={styles.cardSectionTitle}>
-          {t('monthly_economics_section') || 'Monthly Economics'}
+          {t('monthly_economics_section') || 'Monthly Business Economics'}
         </Text>
 
         {/* Row 1: Sales/Month & Unit Price */}
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={[styles.inputContainer, { flex: 1 }]}>
             <View style={styles.rowBetween}>
-              <Text style={styles.inputLabel} numberOfLines={1}>{t('sales_per_month') || 'Sales/Mo'}</Text>
+              <Text style={styles.inputLabel} numberOfLines={1}>{t('sales_per_month') || 'Monthly Units Sold'}</Text>
               <TouchableOpacity
                 style={styles.micSmallBtn}
                 onPress={() =>
                   setVoiceTargetField({
                     id: 'salesPerMonth',
-                    label: t('sales_per_month') || 'Sales / Month',
-                    setter: setSalesPerMonth,
+                    label: t('sales_per_month') || 'Monthly Units Sold',
+                    setter: (val) => handleFieldChange('salesPerMonth', val, setSalesPerMonth),
                   })
                 }
               >
@@ -961,20 +1026,22 @@ function BusinessDetailsScreen() {
               style={styles.input}
               keyboardType="numeric"
               value={salesPerMonth}
-              onChangeText={setSalesPerMonth}
+              placeholder="e.g. 1800"
+              placeholderTextColor={COLORS.outline}
+              onChangeText={(val) => handleFieldChange('salesPerMonth', val, setSalesPerMonth)}
             />
           </View>
 
           <View style={[styles.inputContainer, { flex: 1 }]}>
             <View style={styles.rowBetween}>
-              <Text style={styles.inputLabel} numberOfLines={1}>{t('unit_price') || 'Unit Price'}</Text>
+              <Text style={styles.inputLabel} numberOfLines={1}>{t('unit_price') || 'Selling Price (₹)'}</Text>
               <TouchableOpacity
                 style={styles.micSmallBtn}
                 onPress={() =>
                   setVoiceTargetField({
                     id: 'pricePerUnit',
-                    label: t('unit_price') || 'Unit Price',
-                    setter: setPricePerUnit,
+                    label: t('unit_price') || 'Selling Price per Unit',
+                    setter: (val) => handleFieldChange('pricePerUnit', val, setPricePerUnit),
                   })
                 }
               >
@@ -985,23 +1052,25 @@ function BusinessDetailsScreen() {
               style={styles.input}
               keyboardType="numeric"
               value={pricePerUnit}
-              onChangeText={setPricePerUnit}
+              placeholder="e.g. 40"
+              placeholderTextColor={COLORS.outline}
+              onChangeText={(val) => handleFieldChange('pricePerUnit', val, setPricePerUnit)}
             />
           </View>
         </View>
 
-        {/* Row 2: Unit Cost & Fixed Costs */}
+        {/* Row 2: Variable Cost & Monthly Fixed Cost */}
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={[styles.inputContainer, { flex: 1 }]}>
             <View style={styles.rowBetween}>
-              <Text style={styles.inputLabel} numberOfLines={1}>{t('unit_cost') || 'Unit Cost'}</Text>
+              <Text style={styles.inputLabel} numberOfLines={1}>{t('unit_cost') || 'Var Cost / Unit (₹)'}</Text>
               <TouchableOpacity
                 style={styles.micSmallBtn}
                 onPress={() =>
                   setVoiceTargetField({
                     id: 'costPerUnit',
-                    label: t('unit_cost') || 'Unit Cost',
-                    setter: setCostPerUnit,
+                    label: t('unit_cost') || 'Variable Cost per Unit',
+                    setter: (val) => handleFieldChange('costPerUnit', val, setCostPerUnit),
                   })
                 }
               >
@@ -1012,20 +1081,22 @@ function BusinessDetailsScreen() {
               style={styles.input}
               keyboardType="numeric"
               value={costPerUnit}
-              onChangeText={setCostPerUnit}
+              placeholder="e.g. 18"
+              placeholderTextColor={COLORS.outline}
+              onChangeText={(val) => handleFieldChange('costPerUnit', val, setCostPerUnit)}
             />
           </View>
 
           <View style={[styles.inputContainer, { flex: 1 }]}>
             <View style={styles.rowBetween}>
-              <Text style={styles.inputLabel} numberOfLines={1}>{t('fixed_costs') || 'Fixed Costs'}</Text>
+              <Text style={styles.inputLabel} numberOfLines={1}>{t('fixed_costs') || 'Fixed Cost/Mo (₹)'}</Text>
               <TouchableOpacity
                 style={styles.micSmallBtn}
                 onPress={() =>
                   setVoiceTargetField({
                     id: 'monthlyFixed',
-                    label: t('fixed_costs') || 'Fixed Costs',
-                    setter: setMonthlyFixed,
+                    label: t('fixed_costs') || 'Monthly Business Fixed Cost',
+                    setter: (val) => handleFieldChange('monthlyFixed', val, setMonthlyFixed),
                   })
                 }
               >
@@ -1036,45 +1107,118 @@ function BusinessDetailsScreen() {
               style={styles.input}
               keyboardType="numeric"
               value={monthlyFixed}
-              onChangeText={setMonthlyFixed}
+              placeholder="e.g. 4000"
+              placeholderTextColor={COLORS.outline}
+              onChangeText={(val) => handleFieldChange('monthlyFixed', val, setMonthlyFixed)}
             />
           </View>
         </View>
 
-        {/* Personal Living Cost */}
+        {/* Live Business Operating Surplus Preview — NO household deduction (Section D) */}
+        <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: COLORS.outlineVariant, marginTop: 10, paddingTop: 10 }]}>
+          <Text style={[styles.breakdownLabel, { fontWeight: '800' }]}>
+            {t('operating_surplus') || 'Business Operating Surplus'}
+          </Text>
+          <Text style={[styles.breakdownValue, { fontWeight: '800', color: (operatingSurplus ?? 0) >= 0 ? COLORS.secondary : COLORS.error }]}>
+            {fmt(operatingSurplus)}
+          </Text>
+        </View>
+        <Text style={{ fontSize: 11, color: COLORS.outline, marginTop: 2 }}>
+          {t('surplus_note') || 'Revenue − Variable Costs − Business Fixed Costs (excludes household expenses)'}
+        </Text>
+      </View>
+
+      {/* 3. HOUSEHOLD AFFORDABILITY INPUTS (Sections D, E) */}
+      <View style={styles.card}>
+        <Text style={styles.cardSectionTitle}>
+          {t('household_affordability_section') || 'Household Affordability (Optional)'}
+        </Text>
+        <Text style={{ fontSize: 12, color: COLORS.onSurfaceVariant, marginBottom: 10 }}>
+          {t('household_desc') || 'Used only to evaluate household debt capacity. Does not change business operating surplus.'}
+        </Text>
+
+        {/* Essential Expenses */}
         <View style={styles.inputContainer}>
           <View style={styles.rowBetween}>
-            <Text style={styles.inputLabel}>{t('personal_cost') || 'Personal Living Cost (₹)'}</Text>
+            <Text style={styles.inputLabel}>{t('household_expenses') || 'Essential Monthly Living Expenses (₹)'}</Text>
+            <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+              <TouchableOpacity
+                onPress={() => handleDontKnow('householdEssentialExpenses', setHouseholdEssentialExpenses)}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 11, color: COLORS.outline, textDecorationLine: 'underline' }}>
+                  {t('dont_know_yet') || "Don't know yet"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.micInputBadge}
+                onPress={() =>
+                  setVoiceTargetField({
+                    id: 'householdEssentialExpenses',
+                    label: t('household_expenses') || 'Household Living Expenses',
+                    setter: (val) => handleFieldChange('householdEssentialExpenses', val, setHouseholdEssentialExpenses),
+                  })
+                }
+              >
+                <Text style={{ fontSize: 13 }}>🎙️</Text>
+                <Text style={styles.micInputBadgeText}>Speak</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={householdEssentialExpenses}
+            placeholder="e.g. 8000"
+            placeholderTextColor={COLORS.outline}
+            onChangeText={(val) => handleFieldChange('householdEssentialExpenses', val, setHouseholdEssentialExpenses)}
+          />
+        </View>
+
+        {/* Other Income */}
+        <View style={styles.inputContainer}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.inputLabel}>{t('household_income') || 'Other Monthly Household Income (₹)'}</Text>
             <TouchableOpacity
-              style={styles.micInputBadge}
-              onPress={() =>
-                setVoiceTargetField({
-                  id: 'personalCost',
-                  label: t('personal_cost') || 'Personal Living Cost',
-                  setter: setPersonalCost,
-                })
-              }
+              onPress={() => handleDontKnow('householdIncome', setHouseholdIncome)}
+              activeOpacity={0.7}
             >
-              <Text style={{ fontSize: 13 }}>🎙️</Text>
-              <Text style={styles.micInputBadgeText}>Speak</Text>
+              <Text style={{ fontSize: 11, color: COLORS.outline, textDecorationLine: 'underline' }}>
+                {t('dont_know_yet') || "Don't know yet"}
+              </Text>
             </TouchableOpacity>
           </View>
           <TextInput
             style={styles.input}
             keyboardType="numeric"
-            value={personalCost}
-            onChangeText={setPersonalCost}
+            value={householdIncome}
+            placeholder="e.g. 5000 (from agriculture, other jobs)"
+            placeholderTextColor={COLORS.outline}
+            onChangeText={(val) => handleFieldChange('householdIncome', val, setHouseholdIncome)}
           />
         </View>
 
-        {/* Live Net Profit preview */}
-        <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: COLORS.outlineVariant, marginTop: 10, paddingTop: 10 }]}>
-          <Text style={[styles.breakdownLabel, { fontWeight: '800' }]}>
-            {t('projected_net_profit') || 'Projected Net Profit'}
-          </Text>
-          <Text style={[styles.breakdownValue, { fontWeight: '800', color: monthlyNetProfit >= 0 ? COLORS.secondary : COLORS.error }]}>
-            {fmt(monthlyNetProfit)}
-          </Text>
+        {/* Existing EMI */}
+        <View style={styles.inputContainer}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.inputLabel}>{t('existing_emi') || 'Existing Monthly EMI / Loan Payments (₹)'}</Text>
+            <TouchableOpacity
+              onPress={() => handleDontKnow('existingEMI', setExistingEMI)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 11, color: COLORS.outline, textDecorationLine: 'underline' }}>
+                {t('dont_know_yet') || "Don't know yet"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={existingEMI}
+            placeholder="e.g. 0 or existing loan EMI"
+            placeholderTextColor={COLORS.outline}
+            onChangeText={(val) => handleFieldChange('existingEMI', val, setExistingEMI)}
+          />
         </View>
       </View>
 
@@ -1088,7 +1232,7 @@ function BusinessDetailsScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.primaryButton, { flex: 1, marginLeft: 8 }]}
-          onPress={handleRunRiskTest}
+          onPress={handleSaveAndViewPlan}
         >
           <Text style={styles.primaryButtonText}>{t('save_and_view_plan') || 'Save & View Plan →'}</Text>
         </TouchableOpacity>
@@ -1117,20 +1261,20 @@ function BusinessDetailsScreen() {
 // Business economics and household affordability are SEPARATE.
 // ----------------------------------------------------
 function MyPlanScreen() {
-  const { activeBusiness, navigateTo, setActiveBusinessId, t } = useApp();
+  const { activeBusiness, navigateTo, setActiveBusinessId, user, t } = useApp();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Build canonical plan inputs from activeBusiness
+  // Build canonical plan inputs from activeBusiness using null-safe ?? undefined (Section G)
   const planInputs: BusinessPlanInputs = {
     businessCategory: activeBusiness?.sector || undefined,
     businessTitle: activeBusiness?.title || undefined,
-    setupCost: activeBusiness?.setupCost || undefined,
+    setupCost: activeBusiness?.setupCost ?? undefined,
     availableMarginCapital: activeBusiness?.availableMarginCapital ?? undefined,
-    monthlyUnitsSold: activeBusiness?.salesPerMonth || undefined,
-    sellingPricePerUnit: activeBusiness?.pricePerUnit || undefined,
-    variableCostPerUnit: activeBusiness?.costPerUnit || undefined,
-    monthlyBusinessFixedCost: activeBusiness?.monthlyFixed || undefined,
-    householdEssentialExpenses: activeBusiness?.personalCost || undefined,
+    monthlyUnitsSold: activeBusiness?.salesPerMonth ?? undefined,
+    sellingPricePerUnit: activeBusiness?.pricePerUnit ?? undefined,
+    variableCostPerUnit: activeBusiness?.costPerUnit ?? undefined,
+    monthlyBusinessFixedCost: activeBusiness?.monthlyFixed ?? undefined,
+    householdEssentialExpenses: (activeBusiness?.householdEssentialExpenses ?? activeBusiness?.personalCost) ?? undefined,
     householdNonBusinessIncome: activeBusiness?.householdIncome ?? undefined,
     existingHouseholdEMI: activeBusiness?.existingEMI ?? undefined,
     requestedLoanAmount: activeBusiness?.requestedLoanAmount ?? undefined,
@@ -1163,9 +1307,10 @@ function MyPlanScreen() {
   const handleRunRiskTest = async () => {
     setIsSubmitting(true);
     try {
-      if (isBackendConfigured) {
+      // Backend business creation only if authenticated with valid backendUserId (Section I)
+      if (isBackendConfigured && user?.backendUserId) {
         const businessData = {
-          user_id: 'user_123',
+          user_id: user.backendUserId,
           business_name: activeBusiness.title || 'Business Plan',
           business_category: activeBusiness.sector || 'custom',
           description: JSON.stringify(activeBusiness),
@@ -1185,6 +1330,9 @@ function MyPlanScreen() {
           console.warn('Backend unavailable, continuing with local engine:', (e as Error).message);
           setActiveBusinessId(null);
         }
+      } else {
+        // Stay local/offline - do NOT fake a backend user ID (Section I)
+        setActiveBusinessId(null);
       }
       navigateTo('risk_test');
     } catch (error) {
@@ -1218,7 +1366,7 @@ function MyPlanScreen() {
         </View>
       )}
 
-      {/* Business Economics — NO household data mixed in */}
+      {/* Business Economics — NO household data mixed in (Section D) */}
       <View style={[styles.card, { marginTop: 8 }]}>
         <Text style={styles.cardSectionTitle}>{t('business_economics') || 'Business Economics'}</Text>
         <View style={styles.breakdownRow}>
@@ -1369,22 +1517,22 @@ function MyPlanScreen() {
 // NO fake fallback reports. Backend failure → local deterministic report.
 // ----------------------------------------------------
 function RiskTestScreen() {
-  const { activeBusinessId, setActiveBusinessId, activeBusiness, aiReport, setAiReport, currentLang, t } = useApp();
+  const { activeBusinessId, setActiveBusinessId, activeBusiness, aiReport, setAiReport, user, currentLang, t } = useApp();
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [reportStatus, setReportStatus] = useState<string>('LOADING');
 
-  // Build canonical plan inputs
+  // Build canonical plan inputs using null-safe ?? undefined (Section G)
   const planInputs: BusinessPlanInputs = {
     businessCategory: activeBusiness?.sector || undefined,
     businessTitle: activeBusiness?.title || undefined,
-    setupCost: activeBusiness?.setupCost || undefined,
+    setupCost: activeBusiness?.setupCost ?? undefined,
     availableMarginCapital: activeBusiness?.availableMarginCapital ?? undefined,
-    monthlyUnitsSold: activeBusiness?.salesPerMonth || undefined,
-    sellingPricePerUnit: activeBusiness?.pricePerUnit || undefined,
-    variableCostPerUnit: activeBusiness?.costPerUnit || undefined,
-    monthlyBusinessFixedCost: activeBusiness?.monthlyFixed || undefined,
-    householdEssentialExpenses: activeBusiness?.personalCost || undefined,
+    monthlyUnitsSold: activeBusiness?.salesPerMonth ?? undefined,
+    sellingPricePerUnit: activeBusiness?.pricePerUnit ?? undefined,
+    variableCostPerUnit: activeBusiness?.costPerUnit ?? undefined,
+    monthlyBusinessFixedCost: activeBusiness?.monthlyFixed ?? undefined,
+    householdEssentialExpenses: (activeBusiness?.householdEssentialExpenses ?? activeBusiness?.personalCost) ?? undefined,
     householdNonBusinessIncome: activeBusiness?.householdIncome ?? undefined,
     existingHouseholdEMI: activeBusiness?.existingEMI ?? undefined,
     requestedLoanAmount: activeBusiness?.requestedLoanAmount ?? undefined,
@@ -1406,18 +1554,18 @@ function RiskTestScreen() {
     setReportStatus('LOADING');
 
     try {
-      // Generate local deterministic snapshot FIRST (always available)
+      // Generate local deterministic snapshot FIRST (authoritative)
       const snapshot = generateAnalyticsSnapshot(planInputs);
       const localDashboard = snapshotToDashboardData(snapshot);
 
-      // Try backend AI report for enhanced explanations
+      // Try backend AI report for enhanced explanations (only if backendUser exists — Section I)
       let backendReport = null;
-      if (isBackendConfigured) {
+      if (isBackendConfigured && user?.backendUserId) {
         let bizId = activeBusinessId;
         if (!bizId) {
           try {
             const businessData = {
-              user_id: 'user_123',
+              user_id: user.backendUserId,
               business_name: activeBusiness?.title || 'Business Plan',
               business_category: activeBusiness?.sector || 'custom',
               description: JSON.stringify(activeBusiness || {}),
@@ -1446,17 +1594,24 @@ function RiskTestScreen() {
         }
       }
 
-      // Merge backend explanation into local dashboard if available
-      if (backendReport) {
-        localDashboard.recommendation.rationale = backendReport.summary || localDashboard.recommendation.rationale;
+      // Only merge backend explanation if input_hash and policy_version match local deterministic snapshot (Section W)
+      const bSnapshot = backendReport?.deterministic_snapshot;
+      const bHash = bSnapshot?.input_hash || backendReport?.input_hash;
+      const bPolicy = bSnapshot?.policy_version || backendReport?.policy_version;
+      const hashesMatch = bHash === snapshot.inputHash;
+      const policyMatch = bPolicy === snapshot.policyVersion;
+
+      if (backendReport && hashesMatch && policyMatch) {
+        const explanation = backendReport.explanation || backendReport;
+        localDashboard.recommendation.rationale = explanation.summary || localDashboard.recommendation.rationale;
         localDashboard.recommendation.supportingPoints = [
-          backendReport.deterministic_findings_explained || '',
-          ...(backendReport.caveats || []),
+          explanation.deterministic_findings_explained || '',
+          ...(explanation.caveats || []),
         ].filter(Boolean);
-        localDashboard.recommendation.actionItems = backendReport.suggested_next_steps || localDashboard.recommendation.actionItems;
+        localDashboard.recommendation.actionItems = explanation.suggested_next_steps || localDashboard.recommendation.actionItems;
         setReportStatus('READY');
       } else {
-        setReportStatus(isBackendConfigured ? 'PARTIAL_OFFLINE' : 'PARTIAL_OFFLINE');
+        setReportStatus(snapshot.businessAnalysisAvailable ? 'PARTIAL' : 'INSUFFICIENT_DATA');
       }
 
       setDashboardData(localDashboard);
@@ -1466,7 +1621,7 @@ function RiskTestScreen() {
       try {
         const snapshot = generateAnalyticsSnapshot(planInputs);
         setDashboardData(snapshotToDashboardData(snapshot));
-        setReportStatus('PARTIAL_OFFLINE');
+        setReportStatus(snapshot.businessAnalysisAvailable ? 'PARTIAL' : 'INSUFFICIENT_DATA');
       } catch (localErr) {
         console.error('[RiskTestScreen] Local analytics also failed:', localErr);
         setReportStatus('ERROR');
@@ -1478,7 +1633,10 @@ function RiskTestScreen() {
   };
 
   useEffect(() => {
-    generateReport();
+    const tId = setTimeout(() => {
+      generateReport();
+    }, 0);
+    return () => clearTimeout(tId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeBusinessId]);
 
@@ -1654,11 +1812,11 @@ function TouchlessAuthScreen() {
   const [storedProfile, setStoredProfile] = useState<any>(null);
 
   // Animated pulse for mic
-  const pulseAnim = useRef(new Animated.Value(0)).current;
-  const waveAnim1 = useRef(new Animated.Value(6)).current;
-  const waveAnim2 = useRef(new Animated.Value(14)).current;
-  const waveAnim3 = useRef(new Animated.Value(10)).current;
-  const waveAnim4 = useRef(new Animated.Value(18)).current;
+  const [pulseAnim] = useState(() => new Animated.Value(0));
+  const [waveAnim1] = useState(() => new Animated.Value(6));
+  const [waveAnim2] = useState(() => new Animated.Value(14));
+  const [waveAnim3] = useState(() => new Animated.Value(10));
+  const [waveAnim4] = useState(() => new Animated.Value(18));
 
   // Refs for speech timers
   const speechTimerRef = useRef<any>(null);
@@ -1837,6 +1995,51 @@ function TouchlessAuthScreen() {
     return text;
   };
 
+  // Process received speech result
+  const handleSpeechReceived = (rawText: string) => {
+    const cleaned = cleanSpokenInput(step, rawText);
+    if (!cleaned) return;
+
+    try {
+      sttService.stopListening();
+    } catch (_e) {
+      // ignore
+    }
+    setIsListening(false);
+
+    if (step === 0) {
+      setName(cleaned);
+      const ack = currentLang === 'hi' ? `नमस्ते ${cleaned} जी!` : `Hello ${cleaned}!`;
+      speak(ack, currentLang);
+      setTimeout(() => setStep(1), 1200);
+    } else if (step === 1) {
+      setPlace(cleaned);
+      const ack = currentLang === 'hi' ? `${cleaned}, बहुत बढ़िया!` : `Great, from ${cleaned}!`;
+      speak(ack, currentLang);
+      setTimeout(() => setStep(2), 1200);
+    } else if (step === 2) {
+      setOccupation(cleaned);
+      const ack = currentLang === 'hi' ? 'शानदार कार्य!' : 'Great occupation!';
+      speak(ack, currentLang);
+      setTimeout(() => setStep(3), 1200);
+    } else if (step === 3) {
+      setAge(cleaned);
+      const ack = currentLang === 'hi' ? 'धन्यवाद! आपकी प्रोफ़ाइल तैयार है।' : 'Thank you! Your profile is ready.';
+      speak(ack, currentLang);
+      setTimeout(() => setStep(4), 1200);
+    }
+  };
+
+  // Stop listening
+  const stopListening = useCallback(() => {
+    try {
+      sttService.stopListening();
+    } catch (_e) {
+      // ignore
+    }
+    setIsListening(false);
+  }, []);
+
   // Start speech recognition for current step
   const startListening = useCallback(() => {
     stopSpeaking();
@@ -1869,21 +2072,16 @@ function TouchlessAuthScreen() {
     }
   }, [currentLang, step]);
 
-  // Stop listening
-  const stopListening = useCallback(() => {
+  // Play question audio prompt and then auto-listen touchlessly
+  const playPromptAndListen = useCallback((stepIdx: number) => {
+    if (stepIdx > 3) return;
+    clearTimeout(speechTimerRef.current);
     try {
       sttService.stopListening();
     } catch (_e) {
       // ignore
     }
     setIsListening(false);
-  }, []);
-
-  // Play question audio prompt and then auto-listen touchlessly
-  const playPromptAndListen = useCallback((stepIdx: number) => {
-    if (stepIdx > 3) return;
-    clearTimeout(speechTimerRef.current);
-    stopListening();
 
     const q = questions[stepIdx];
     if (!q) return;
@@ -1895,49 +2093,27 @@ function TouchlessAuthScreen() {
     speechTimerRef.current = setTimeout(() => {
       startListening();
     }, 1500);
-  }, [currentLang, questions, startListening, stopListening]);
+  }, [currentLang, questions, startListening]);
 
   // Trigger prompt when step changes
   useEffect(() => {
+    let tId: any = null;
     if (step <= 3) {
-      playPromptAndListen(step);
+      tId = setTimeout(() => {
+        playPromptAndListen(step);
+      }, 50);
     }
     return () => {
+      clearTimeout(tId);
       clearTimeout(speechTimerRef.current);
       stopSpeaking();
-      stopListening();
+      try {
+        sttService.stopListening();
+      } catch (_e) {
+        // ignore
+      }
     };
-  }, [step]);
-
-  // Process received speech result
-  const handleSpeechReceived = (rawText: string) => {
-    const cleaned = cleanSpokenInput(step, rawText);
-    if (!cleaned) return;
-
-    stopListening();
-
-    if (step === 0) {
-      setName(cleaned);
-      const ack = currentLang === 'hi' ? `नमस्ते ${cleaned} जी!` : `Hello ${cleaned}!`;
-      speak(ack, currentLang);
-      setTimeout(() => setStep(1), 1200);
-    } else if (step === 1) {
-      setPlace(cleaned);
-      const ack = currentLang === 'hi' ? `${cleaned}, बहुत बढ़िया!` : `Great, from ${cleaned}!`;
-      speak(ack, currentLang);
-      setTimeout(() => setStep(2), 1200);
-    } else if (step === 2) {
-      setOccupation(cleaned);
-      const ack = currentLang === 'hi' ? 'शानदार कार्य!' : 'Great occupation!';
-      speak(ack, currentLang);
-      setTimeout(() => setStep(3), 1200);
-    } else if (step === 3) {
-      setAge(cleaned);
-      const ack = currentLang === 'hi' ? 'धन्यवाद! आपकी प्रोफ़ाइल तैयार है।' : 'Thank you! Your profile is ready.';
-      speak(ack, currentLang);
-      setTimeout(() => setStep(4), 1200);
-    }
-  };
+  }, [step, playPromptAndListen]);
 
   // Manual Next Button click
   const handleNextStep = () => {
@@ -1962,52 +2138,57 @@ function TouchlessAuthScreen() {
     }
   };
 
-  // Complete onboarding on Step 4
-  useEffect(() => {
-    if (step === 4) {
-      stopListening();
-      const finalName = name || 'Friend';
-      const welcomePhrase = currentLang === 'hi'
-        ? `स्वागत है ${finalName} जी! आपका आर्थिक खाता तैयार है।`
-        : `Welcome ${finalName}! Your Aarthika profile is ready.`;
-      speak(welcomePhrase, currentLang);
-
-      // Auto-save and navigate after 2 seconds
-      finishTimerRef.current = setTimeout(() => {
-        handleFinalSubmit();
-      }, 2000);
-    }
-    return () => {
-      clearTimeout(finishTimerRef.current);
-    };
-  }, [step]);
-
-  const handleFinalSubmit = async () => {
+  const handleFinalSubmit = useCallback(async () => {
     clearTimeout(finishTimerRef.current);
     setIsSaving(true);
     try {
       await saveTouchlessProfile({
-        name: name || 'Entrepreneur',
-        place: place || 'Local',
-        occupation: occupation || 'Small Business',
-        age: age || '30',
+        name: name.trim(),
+        place: place.trim(),
+        occupation: occupation.trim(),
+        age: age.trim(),
       });
     } catch (e) {
       console.warn('Failed to save profile', e);
       setIsSaving(false);
     }
-  };
+  }, [name, place, occupation, age]);
 
-  // Quick restore previous profile
+  // Complete onboarding on Step 4
+  useEffect(() => {
+    let tId: any = null;
+    if (step === 4) {
+      tId = setTimeout(() => {
+        stopListening();
+        const finalName = name || 'Friend';
+        const welcomePhrase = currentLang === 'hi'
+          ? `स्वागत है ${finalName} जी! आपका आर्थिक खाता तैयार है।`
+          : `Welcome ${finalName}! Your Aarthika profile is ready.`;
+        speak(welcomePhrase, currentLang);
+
+        // Auto-save and navigate after 2 seconds
+        finishTimerRef.current = setTimeout(() => {
+          handleFinalSubmit();
+        }, 2000);
+      }, 50);
+    }
+    return () => {
+      clearTimeout(tId);
+      clearTimeout(finishTimerRef.current);
+    };
+  }, [step, name, currentLang, stopListening, handleFinalSubmit]);
+
+  // Quick restore previous profile — no fake defaults (Section J)
   const handleQuickRestore = async (prof: any) => {
     stopSpeaking();
     stopListening();
     setIsSaving(true);
     await saveTouchlessProfile({
-      name: prof.name || prof.fullName || 'Entrepreneur',
-      place: prof.place || prof.village || prof.district || 'Local',
-      occupation: prof.occupation || 'Small Business',
-      age: prof.age || '30',
+      name: (prof.name || prof.fullName || '').trim(),
+      place: (prof.place || prof.village || prof.district || '').trim(),
+      occupation: (prof.occupation || '').trim(),
+      age: prof.age ? String(prof.age).trim() : '',
+      isGuest: !!prof.isGuest,
     });
   };
 
@@ -2177,7 +2358,7 @@ function TouchlessAuthScreen() {
           {liveTranscript ? (
             <View style={styles.touchlessLiveTranscriptPill}>
               <Text style={styles.touchlessLiveTranscriptText}>
-                "{liveTranscript}"
+                &ldquo;{liveTranscript}&rdquo;
               </Text>
             </View>
           ) : null}
@@ -2308,10 +2489,11 @@ function TouchlessAuthScreen() {
             stopSpeaking();
             stopListening();
             saveTouchlessProfile({
-              name: 'Entrepreneur',
-              place: 'Local',
-              occupation: 'Small Business',
-              age: '30',
+              isGuest: true,
+              name: '',
+              place: '',
+              occupation: '',
+              age: '',
             });
           }}
           activeOpacity={0.7}

@@ -17,7 +17,7 @@ router = APIRouter(tags=["Pre-Investment Decisions"])
 )
 def generate_business_decision(business_id: str, db: Session = Depends(get_db)):
     """
-    Synthesize pre-investment decision (GO / MODIFY / DO_NOT_INVEST_YET).
+    Synthesize pre-investment readiness assessment (READY_FOR_FINANCE_REVIEW / HIGH_RISK / TEST_FIRST / MODIFY / INCOMPLETE / INSUFFICIENT_DATA).
     Evaluates unit economics, stress tests, real-world pilot evidence, and debt affordability.
     """
     biz = db.get(Business, business_id)

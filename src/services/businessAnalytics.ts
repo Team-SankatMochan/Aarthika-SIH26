@@ -57,13 +57,19 @@ export interface BusinessPlanInputs {
 
   // Unit type label for display
   unitType?: string;
+
+  // Track field-level provenance
+  fieldProvenance?: Record<string, DataProvenance>;
+  presetSource?: string | null;
 }
 
 export type ReportStatus =
   | 'LOADING'
   | 'READY'
+  | 'PARTIAL'
   | 'PARTIAL_OFFLINE'
   | 'INSUFFICIENT_DATA'
+  | 'BACKEND_UNAVAILABLE'
   | 'ERROR';
 
 export interface StressScenarioResult {
@@ -75,7 +81,10 @@ export interface StressScenarioResult {
   operatingSurplus: number;
   emi: number | null;
   dscr: number | null;
-  readiness: string;
+  businessAffordabilityStatus: string;
+  householdAffordabilityStatus: string;
+  overallReadiness: string;
+  readiness: string; // for backward compatibility, mirrors overallReadiness
   revenueChange: number;
   costChange: number;
   netCashFlow: number;
@@ -91,6 +100,8 @@ export interface RiskFinding {
   impact: 'Low' | 'Medium' | 'High';
   source: DataProvenance;
   detail: string;
+  probability?: number | null;
+  financialExposure?: number | null;
 }
 
 export interface SwotItem {
@@ -105,7 +116,15 @@ export interface AnalyticsSnapshot {
   status: ReportStatus;
   source: 'LOCAL_DETERMINISTIC' | 'BACKEND_ENHANCED';
   timestamp: number;
+  policyVersion: string;
+  inputHash: string;
   missingFields: string[];
+
+  // Section status breakdown (Section Z)
+  businessAnalysisStatus: 'COMPLETE' | 'VIABLE' | 'STRUCTURALLY_UNVIABLE' | 'INSUFFICIENT_DATA';
+  financingAnalysisStatus: 'COMPLETE' | 'SCHEME_ROUTED' | 'INCOMPLETE';
+  householdAnalysisStatus: 'COMPLETE' | 'INCOMPLETE' | 'INSUFFICIENT_DATA';
+  marketAnalysisStatus: 'VERIFIED_DATA' | 'NO_VERIFIED_DATA';
 
   // Raw user inputs
   inputs: BusinessPlanInputs;
@@ -131,9 +150,11 @@ export interface AnalyticsSnapshot {
   affordableLoanAmount: number | null;
   recommendedLoanAmount: number | null;
   householdDebtRatio: number | null;
+  businessAffordabilityStatus: string;
+  householdAffordabilityStatus: string;
   overallReadiness: string;
 
-  // Business-only analysis availability
+  // Availability flags
   businessAnalysisAvailable: boolean;
   householdAnalysisAvailable: boolean;
 
@@ -150,12 +171,140 @@ export interface AnalyticsSnapshot {
     opportunities: SwotItem[];
     threats: SwotItem[];
   };
+
+  // Provenance breakdown
+  provenance: {
+    userProvided: string[];
+    calculations: string[];
+    governmentRule: string;
+    marketData: 'NO_VERIFIED_DATA' | 'VERIFIED_DATA';
+    aiExplanationOnly: boolean;
+  };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function isPresent(v: any): v is number {
   return v !== null && v !== undefined;
+}
+
+/**
+ * Format editable string value.
+ * Explicit 0 remains '0'. Missing (null / undefined) remains ''.
+ */
+export function editableValue(value: number | null | undefined): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+/**
+ * Create a completely blank custom business.
+ * Never inherits stale preset assumptions.
+ */
+export function createBlankCustomBusiness(title: string) {
+  return {
+    sector: 'custom',
+    title,
+    setupCost: null,
+    monthlyFixed: null,
+    unitType: '',
+    pricePerUnit: null,
+    costPerUnit: null,
+    salesPerMonth: null,
+    householdEssentialExpenses: null,
+    householdIncome: null,
+    existingEMI: null,
+    availableMarginCapital: null,
+    requestedLoanAmount: null,
+    presetSource: null,
+    breakdown: [],
+  };
+}
+
+/**
+ * Pure JS SHA-256 implementation for portable input hashing across React Native and Node.
+ */
+function sha256Hex(str: string): string {
+  function rightRotate(value: number, amount: number) {
+    return (value >>> amount) | (value << (32 - amount));
+  }
+  const mathPow = Math.pow;
+  const maxWord = mathPow(2, 32);
+  let i: number, j: number;
+  let result = '';
+
+  const words: number[] = [];
+  const asciiBitLength = str.length * 8;
+
+  let hash = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ];
+
+  const k = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ];
+
+  for (i = 0; i < str.length; i++) {
+    const charCode = str.charCodeAt(i);
+    words[i >> 2] |= charCode << ((3 - (i % 4)) * 8);
+  }
+  words[asciiBitLength >> 5] |= 0x80 << (24 - (asciiBitLength % 32));
+  words[(((asciiBitLength + 64) >> 9) << 4) + 15] = asciiBitLength;
+
+  for (i = 0; i < words.length; i += 16) {
+    const w = words.slice(i, i + 16);
+    const oldHash = hash.slice(0);
+
+    for (j = 0; j < 64; j++) {
+      if (j >= 16) {
+        const s0 = rightRotate(w[j - 15], 7) ^ rightRotate(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+        const s1 = rightRotate(w[j - 2], 17) ^ rightRotate(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+        w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
+      }
+      const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
+      const maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
+      const s0 = rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22);
+      const s1 = rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25);
+      const temp1 = hash[7] + s1 + ch + k[j] + (w[j] | 0);
+      const temp2 = s0 + maj;
+
+      hash = [(temp1 + temp2) | 0, hash[0], hash[1], hash[2], (hash[3] + temp1) | 0, hash[4], hash[5], hash[6]];
+    }
+    for (j = 0; j < 8; j++) {
+      hash[j] = (hash[j] + oldHash[j]) | 0;
+    }
+  }
+
+  for (i = 0; i < 8; i++) {
+    for (j = 3; j >= 0; j--) {
+      const b = (hash[i] >> (8 * j)) & 255;
+      result += (b < 16 ? '0' : '') + b.toString(16);
+    }
+  }
+  return result;
+}
+
+/**
+ * Compute SHA-256 hash matching backend compute_input_hash
+ */
+export function computeInputHash(inputs: Record<string, any>, policyVersion: string): string {
+  const canonical: Record<string, string> = {};
+  const sortedKeys = Object.keys(inputs).sort();
+  for (const k of sortedKeys) {
+    const v = inputs[k];
+    if (v !== null && v !== undefined) {
+      canonical[k] = String(v);
+    }
+  }
+  canonical['_policy_version'] = String(policyVersion);
+  return sha256Hex(JSON.stringify(canonical));
 }
 
 // ── Core Analytics ──────────────────────────────────────────────────────────
@@ -201,7 +350,6 @@ export function buildCanonicalInputs(plan: BusinessPlanInputs): Record<string, a
     : null;
 
   if (scheme && !scheme.isOutOfScope) {
-    // Requested loan: use user-provided if available, else use scheme max loan component
     inputs.requested_loan_amount = isPresent(plan.requestedLoanAmount)
       ? plan.requestedLoanAmount
       : scheme.maxLoanComponent;
@@ -209,13 +357,26 @@ export function buildCanonicalInputs(plan: BusinessPlanInputs): Record<string, a
     inputs.annual_interest_rate_percent = scheme.interestRate;
     inputs.repayment_tenure_months = scheme.activeRepaymentMonths;
     inputs.moratorium_months = scheme.moratoriumMonths;
-    inputs.moratorium_interest_method = 'SIMPLE_CAPITALIZE';
+    // Section K: Moratorium interest method defaults to 'NONE' unless versioned gov rule says otherwise.
+    inputs.moratorium_interest_method = 'NONE';
   } else if (isPresent(plan.requestedLoanAmount)) {
     // User supplied loan amount but no scheme terms — financing structure is incomplete
     inputs.requested_loan_amount = plan.requestedLoanAmount;
   }
 
   return inputs;
+}
+
+function deriveBusinessAffordabilityStatus(dscr: number | null, operatingSurplus: number | null, fallback?: string): string {
+  if (dscr !== null) {
+    return dscr >= AARTHIKA_CALCULATION_POLICY.minimum_required_dscr
+      ? 'READY_FOR_FINANCE_REVIEW'
+      : 'HIGH_RISK';
+  }
+  if (operatingSurplus !== null && operatingSurplus < 0) {
+    return 'HIGH_RISK';
+  }
+  return fallback ?? 'INCOMPLETE';
 }
 
 /**
@@ -230,6 +391,9 @@ export function generateAnalyticsSnapshot(plan: BusinessPlanInputs): AnalyticsSn
   let financeResult: Record<string, any> = {};
   let status: ReportStatus = 'READY';
   const missingFields: string[] = [];
+  if (!isPresent(plan.monthlyUnitsSold)) missingFields.push('monthly_units_sold');
+  if (!isPresent(plan.sellingPricePerUnit)) missingFields.push('selling_price_per_unit');
+  if (!isPresent(plan.variableCostPerUnit)) missingFields.push('variable_cost_per_unit');
 
   try {
     financeResult = calculateFinancialAssessment(canonicalInputs, AARTHIKA_CALCULATION_POLICY);
@@ -259,6 +423,13 @@ export function generateAnalyticsSnapshot(plan: BusinessPlanInputs): AnalyticsSn
   const recommendedLoanAmount = financeResult.recommended_loan_amount ?? null;
   const householdDebtRatio = financeResult.post_loan_household_debt_ratio ?? null;
 
+  // Section P: Derive businessAffordabilityStatus independently from household data
+  const businessAffordabilityStatus = deriveBusinessAffordabilityStatus(
+    businessDscr,
+    operatingSurplus,
+    financeResult.business_affordability_status
+  );
+  const householdAffordabilityStatus = financeResult.household_affordability_status ?? 'INCOMPLETE';
   const overallReadiness = financeResult.overall_readiness ?? 'INCOMPLETE';
 
   const businessAnalysisAvailable = operatingSurplus !== null;
@@ -275,15 +446,63 @@ export function generateAnalyticsSnapshot(plan: BusinessPlanInputs): AnalyticsSn
   // Generate dynamic SWOT
   const swot = generateDynamicSwot(plan, financeResult, stressResults);
 
-  if (status !== 'ERROR' && missingFields.length > 0) {
-    status = operatingSurplus !== null ? 'READY' : 'INSUFFICIENT_DATA';
+  // Section Z: Section statuses
+  const businessAnalysisStatus: AnalyticsSnapshot['businessAnalysisStatus'] =
+    operatingSurplus === null
+      ? 'INSUFFICIENT_DATA'
+      : breakEvenStatus === 'STRUCTURALLY_UNVIABLE'
+      ? 'STRUCTURALLY_UNVIABLE'
+      : 'COMPLETE';
+
+  const financingAnalysisStatus: AnalyticsSnapshot['financingAnalysisStatus'] =
+    candidateEmi !== null && businessDscr !== null
+      ? 'COMPLETE'
+      : scheme && !scheme.isOutOfScope
+      ? 'SCHEME_ROUTED'
+      : 'INCOMPLETE';
+
+  const householdAnalysisStatus: AnalyticsSnapshot['householdAnalysisStatus'] =
+    householdDebtRatio !== null
+      ? 'COMPLETE'
+      : financeResult.household_affordability_status === 'INSUFFICIENT_DATA'
+      ? 'INSUFFICIENT_DATA'
+      : 'INCOMPLETE';
+
+  const marketAnalysisStatus: AnalyticsSnapshot['marketAnalysisStatus'] = 'NO_VERIFIED_DATA';
+
+  // Section Z: Overall report status
+  if (status !== 'ERROR') {
+    if (businessAnalysisStatus === 'INSUFFICIENT_DATA') {
+      status = 'INSUFFICIENT_DATA';
+    } else if (financingAnalysisStatus === 'COMPLETE' && householdAnalysisStatus === 'COMPLETE') {
+      status = 'READY';
+    } else {
+      status = 'PARTIAL';
+    }
   }
+
+  const policyVersion = String(AARTHIKA_CALCULATION_POLICY.policy_version || 'policy-2026-v1');
+  const inputHash = computeInputHash(canonicalInputs, policyVersion);
+
+  const provenance = {
+    userProvided: Object.keys(canonicalInputs).filter(k => canonicalInputs[k] !== undefined && canonicalInputs[k] !== null),
+    calculations: ['Revenue', 'Break-even', 'Candidate EMI', 'Business DSCR', 'Stress Scenarios'],
+    governmentRule: scheme && !scheme.isOutOfScope ? scheme.schemeName : 'None (No margin capital provided)',
+    marketData: 'NO_VERIFIED_DATA' as const,
+    aiExplanationOnly: true,
+  };
 
   return {
     status,
     source: 'LOCAL_DETERMINISTIC',
     timestamp: Date.now(),
+    policyVersion,
+    inputHash,
     missingFields,
+    businessAnalysisStatus,
+    financingAnalysisStatus,
+    householdAnalysisStatus,
+    marketAnalysisStatus,
     inputs: plan,
     schemeTerms: scheme,
     financeResult,
@@ -301,12 +520,15 @@ export function generateAnalyticsSnapshot(plan: BusinessPlanInputs): AnalyticsSn
     affordableLoanAmount,
     recommendedLoanAmount,
     householdDebtRatio,
+    businessAffordabilityStatus,
+    householdAffordabilityStatus,
     overallReadiness,
     businessAnalysisAvailable,
     householdAnalysisAvailable,
     stressResults,
     riskFindings,
     swot,
+    provenance,
   };
 }
 
@@ -329,6 +551,9 @@ function generateStressScenarios(
   const baseSurplus = baseResult.monthly_operating_surplus ?? 0;
   const baseEmi = baseResult.candidate_emi ?? 0;
 
+  const baseDscr = baseResult.business_dscr ?? null;
+  const baseBizStatus = deriveBusinessAffordabilityStatus(baseDscr, baseSurplus, baseResult.business_affordability_status);
+
   // BASELINE
   scenarios.push({
     name: 'BASELINE',
@@ -338,7 +563,10 @@ function generateStressScenarios(
     fixedCost: baseFixed,
     operatingSurplus: baseSurplus,
     emi: baseEmi || null,
-    dscr: baseResult.business_dscr ?? null,
+    dscr: baseDscr,
+    businessAffordabilityStatus: baseBizStatus,
+    householdAffordabilityStatus: baseResult.household_affordability_status ?? 'INCOMPLETE',
+    overallReadiness: baseResult.overall_readiness ?? 'INCOMPLETE',
     readiness: baseResult.overall_readiness ?? 'INCOMPLETE',
     revenueChange: 0,
     costChange: 0,
@@ -360,6 +588,9 @@ function generateStressScenarios(
     const fixed = demandResult.monthly_fixed_cost ?? 0;
     const surplus = demandResult.monthly_operating_surplus ?? 0;
     const emi = demandResult.candidate_emi ?? baseEmi;
+    const dscr = demandResult.business_dscr ?? (emi > 0 ? surplus / emi : null);
+    const bizStatus = deriveBusinessAffordabilityStatus(dscr, surplus, demandResult.business_affordability_status);
+
     scenarios.push({
       name: 'DEMAND_DROP_20',
       label: 'Sales −20%',
@@ -368,7 +599,10 @@ function generateStressScenarios(
       fixedCost: fixed,
       operatingSurplus: surplus,
       emi: emi || null,
-      dscr: demandResult.business_dscr ?? null,
+      dscr,
+      businessAffordabilityStatus: bizStatus,
+      householdAffordabilityStatus: demandResult.household_affordability_status ?? 'INCOMPLETE',
+      overallReadiness: demandResult.overall_readiness ?? 'INCOMPLETE',
       readiness: demandResult.overall_readiness ?? 'INCOMPLETE',
       revenueChange: -20,
       costChange: 0,
@@ -393,6 +627,9 @@ function generateStressScenarios(
     const fixed = rawMatResult.monthly_fixed_cost ?? 0;
     const surplus = rawMatResult.monthly_operating_surplus ?? 0;
     const emi = rawMatResult.candidate_emi ?? baseEmi;
+    const dscr = rawMatResult.business_dscr ?? (emi > 0 ? surplus / emi : null);
+    const bizStatus = deriveBusinessAffordabilityStatus(dscr, surplus, rawMatResult.business_affordability_status);
+
     scenarios.push({
       name: 'RAW_MATERIAL_UP_20',
       label: 'Input Cost +20%',
@@ -401,7 +638,10 @@ function generateStressScenarios(
       fixedCost: fixed,
       operatingSurplus: surplus,
       emi: emi || null,
-      dscr: rawMatResult.business_dscr ?? null,
+      dscr,
+      businessAffordabilityStatus: bizStatus,
+      householdAffordabilityStatus: rawMatResult.household_affordability_status ?? 'INCOMPLETE',
+      overallReadiness: rawMatResult.overall_readiness ?? 'INCOMPLETE',
       readiness: rawMatResult.overall_readiness ?? 'INCOMPLETE',
       revenueChange: 0,
       costChange: 20,
@@ -501,29 +741,28 @@ function generateDynamicRiskFindings(
     });
   }
 
-  // Stress scenario: demand shock
+  // Section P: For business stress findings, compare businessAffordabilityStatus
   const demandStress = stressResults.find(s => s.name === 'DEMAND_DROP_20');
-  if (demandStress && (demandStress.readiness === 'HIGH_RISK' || (demandStress.operatingSurplus <= 0))) {
+  if (demandStress && (demandStress.businessAffordabilityStatus === 'HIGH_RISK' || demandStress.operatingSurplus <= 0)) {
     findings.push({
       risk: 'Demand-shock sensitivity',
       category: 'Market Risk',
       severity: 'Medium',
       impact: 'Medium',
       source: 'AARTHIKA_CALCULATION',
-      detail: `A 20% drop in sales volume moves the business to ${demandStress.readiness || 'negative surplus'}.`,
+      detail: `A 20% drop in sales volume causes business stress (surplus: ${formatINR(demandStress.operatingSurplus)}, status: ${demandStress.businessAffordabilityStatus}).`,
     });
   }
 
-  // Stress scenario: input cost
   const rawMatStress = stressResults.find(s => s.name === 'RAW_MATERIAL_UP_20');
-  if (rawMatStress && (rawMatStress.readiness === 'HIGH_RISK' || (rawMatStress.operatingSurplus <= 0))) {
+  if (rawMatStress && (rawMatStress.businessAffordabilityStatus === 'HIGH_RISK' || rawMatStress.operatingSurplus <= 0)) {
     findings.push({
       risk: 'Input-cost sensitivity',
       category: 'Operational Risk',
       severity: 'Medium',
       impact: 'Medium',
       source: 'AARTHIKA_CALCULATION',
-      detail: `A 20% increase in raw material costs moves the business to ${rawMatStress.readiness || 'negative surplus'}.`,
+      detail: `A 20% increase in raw material costs causes business stress (surplus: ${formatINR(rawMatStress.operatingSurplus)}, status: ${rawMatStress.businessAffordabilityStatus}).`,
     });
   }
 
@@ -636,7 +875,7 @@ function generateDynamicSwot(
     });
   }
 
-  // Opportunities — only category-level hypotheses
+  // Opportunities
   opportunities.push({
     finding: 'Market evidence not yet verified',
     whyItMatters: 'Local demand, pricing, and competition data needs on-ground validation',
@@ -647,7 +886,7 @@ function generateDynamicSwot(
   if (plan.businessCategory) {
     opportunities.push({
       finding: `Explore government scheme eligibility for ${plan.businessCategory}`,
-      whyItMatters: 'May qualify for subsidized financing terms',
+      whyItMatters: 'May qualify for subsidized financing terms under SIH guidelines',
       impact: 'Medium',
       source: 'AI_HYPOTHESIS',
     });
@@ -685,30 +924,26 @@ function generateDynamicSwot(
 }
 
 /**
- * Convert an AnalyticsSnapshot to the RiskAnalysisDashboard's RiskData shape.
- * This is the ONLY transformation the dashboard should use.
+ * Convert an AnalyticsSnapshot to the RiskAnalysisDashboard's view model.
+ * Pure deterministic metrics — no synthetic scores, no GO/CAUTION/NO-GO, no fake zeros.
  */
 export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<string, any> {
   const plan = snapshot.inputs;
   const fr = snapshot.financeResult;
 
-  // Compute a real financial resilience ratio from actual data
-  const financialResilience = snapshot.monthlyRevenue && snapshot.monthlyRevenue > 0
-    ? Math.min(0.95, Math.max(0.05, (snapshot.operatingSurplus ?? 0) / snapshot.monthlyRevenue))
-    : 0;
-
-  // Map risk findings to dashboard format
+  // Section O: Probability and exposure are null/undefined unless evidence-backed.
   const risks = snapshot.riskFindings.map(rf => ({
     risk: rf.risk,
     category: rf.category,
-    probability: 0, // No fake probabilities — set to 0
+    probability: rf.probability ?? null,
     impact: rf.impact,
     severity: rf.severity,
-    financialExposure: 0, // Only show if we have a real basis
+    financialExposure: rf.financialExposure ?? null,
     mitigation: rf.detail,
+    source: rf.source,
   }));
 
-  // Map SWOT
+  // SWOT
   const swot = {
     strengths: snapshot.swot.strengths.map(s => ({
       finding: s.finding,
@@ -736,25 +971,41 @@ export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<str
     })),
   };
 
-  // Derive overall risk posture from actual DSCR and surplus
-  const overallRiskScore = snapshot.businessDscr != null
-    ? Math.min(1, Math.max(0, 1 - (snapshot.businessDscr / (AARTHIKA_CALCULATION_POLICY.minimum_required_dscr * 2))))
-    : (snapshot.operatingSurplus != null && snapshot.operatingSurplus <= 0 ? 0.85 : 0.5);
-
-  const businessViabilityScore = snapshot.operatingSurplus != null && snapshot.monthlyRevenue != null && snapshot.monthlyRevenue > 0
-    ? Math.min(1, Math.max(0, snapshot.operatingSurplus / snapshot.monthlyRevenue))
-    : 0;
-
   // Loan terms from scheme
   const schemeInterest = snapshot.schemeTerms?.interestRate ?? null;
   const schemeTenure = snapshot.schemeTerms?.activeRepaymentMonths ?? null;
 
+  // Canonical readiness label & rationale
+  const readiness = snapshot.overallReadiness;
+  let humanLabel = 'More information needed';
+  let rationale = 'Analysis is incomplete — additional information is needed.';
+  if (readiness === 'READY_FOR_FINANCE_REVIEW') {
+    humanLabel = 'Ready for finance review';
+    rationale = 'Business economics and household affordability meet policy thresholds.';
+  } else if (readiness === 'HIGH_RISK') {
+    humanLabel = 'Financial pressure detected';
+    rationale = 'One or more critical thresholds are not met. Review the specific risk findings.';
+  } else if (readiness === 'OUT_OF_SCOPE') {
+    humanLabel = 'Outside this scheme route';
+    rationale = 'Project cost exceeds maximum limit for the available scheme.';
+  }
+
   return {
-    overallRiskScore,
-    businessViabilityScore,
-    financialResilience,
-    marketRisk: 0, // NO fake market risk — we have no verified data
-    operationalRisk: 0, // NO fake operational risk
+    // Section N: Real deterministic metrics
+    deterministicMetrics: {
+      monthlyRevenue: snapshot.monthlyRevenue,
+      monthlyOperatingSurplus: snapshot.operatingSurplus,
+      candidateEmi: snapshot.candidateEmi,
+      businessDscr: snapshot.businessDscr,
+      breakEvenUnits: snapshot.breakEvenUnits,
+      maximumAffordableEmi: snapshot.maximumAffordableEmi,
+      affordableLoanAmount: snapshot.affordableLoanAmount,
+      postLoanHouseholdDebtRatio: snapshot.householdDebtRatio,
+      businessReadiness: snapshot.businessAffordabilityStatus,
+      householdReadiness: snapshot.householdAffordabilityStatus,
+      overallReadiness: snapshot.overallReadiness,
+    },
+    marketDataStatus: 'NO_VERIFIED_DATA' as const,
     swot,
     risks,
     financials: {
@@ -773,21 +1024,19 @@ export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<str
       salesPerMonth: plan.monthlyUnitsSold ?? 0,
       monthlyFixed: snapshot.monthlyFixedCost ?? 0,
       personalCost: plan.householdEssentialExpenses ?? 0,
+      householdEssentialExpenses: plan.householdEssentialExpenses ?? 0,
       setupCost: plan.setupCost ?? 0,
-      loanAmount: fr.recommended_loan_amount ?? fr.requested_loan_amount ?? 0,
-      interestRatePercent: schemeInterest ?? 0,
-      loanTenureMonths: schemeTenure ?? 0,
+      availableMarginCapital: plan.availableMarginCapital ?? null,
+      loanAmount: fr.recommended_loan_amount ?? fr.requested_loan_amount ?? null,
+      interestRatePercent: schemeInterest,
+      loanTenureMonths: schemeTenure,
     },
     scenarios: snapshot.stressResults,
     recommendation: {
-      decision: snapshot.overallReadiness === 'READY_FOR_FINANCE_REVIEW' ? 'GO'
-        : snapshot.overallReadiness === 'HIGH_RISK' ? 'CAUTION'
-        : 'REVIEW',
-      rationale: snapshot.overallReadiness === 'READY_FOR_FINANCE_REVIEW'
-        ? 'Business economics and household affordability meet policy thresholds.'
-        : snapshot.overallReadiness === 'HIGH_RISK'
-        ? 'One or more critical thresholds are not met. Review the specific risk findings.'
-        : 'Analysis is incomplete — additional information is needed.',
+      decision: readiness,
+      decisionLabel: humanLabel,
+      rationale,
+      disclaimer: 'This is a business-plan readiness assessment, not loan approval.',
       supportingPoints: snapshot.missingFields.length > 0
         ? [`Missing data: ${snapshot.missingFields.join(', ')}`]
         : [],
@@ -797,7 +1046,7 @@ export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<str
         'Confirm supplier pricing and availability',
       ],
     },
-    // Extra fields for enhanced display
+    provenance: snapshot.provenance,
     analyticsSnapshot: snapshot,
   };
 }

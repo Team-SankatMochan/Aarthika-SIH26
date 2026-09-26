@@ -28,15 +28,3 @@ export const TIER_BADGES: Record<string, { label: string; color: string; icon: s
   tier3: { label: 'Town', color: '#EF9F27', icon: '🏡' },
   rural: { label: 'Rural', color: '#8B6F47', icon: '🌾' },
 };
-
-export const RISK_LEVELS = {
-  low: { label: 'GO', color: '#639922', icon: '✓' },
-  medium: { label: 'CAUTION', color: '#EF9F27', icon: '⚠' },
-  high: { label: 'NO-GO', color: '#E24B4A', icon: '✗' },
-};
-
-export function getRiskLevel(riskRatio: number): keyof typeof RISK_LEVELS {
-  if (riskRatio < 0.4) return 'low';
-  if (riskRatio < 0.7) return 'medium';
-  return 'high';
-}

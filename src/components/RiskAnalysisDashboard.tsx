@@ -10,8 +10,13 @@ import {
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import Svg, { Rect, Line, Polygon, Polyline, Circle, Text as SvgText } from 'react-native-svg';
-import { GoNoGoGauge } from '../../components/GoNoGoGauge';
 import { formatINR } from '../../engine/financeCalculator';
+import {
+  generateAnalyticsSnapshot,
+  type BusinessPlanInputs,
+  type AnalyticsSnapshot,
+  type StressScenarioResult,
+} from '../services/businessAnalytics';
 import { ThemedView } from './themed-view';
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
@@ -20,15 +25,24 @@ import type { ThemeColor } from '@/constants/theme';
 
 /* ────────────────────────────────────────────────────────────
  *  RiskData — frontend view-model for the risk dashboard.
- *  Every section of the dashboard reads from this one shape.
+ *  Based on real deterministic metrics.
  * ──────────────────────────────────────────────────────────── */
 
 export interface RiskData {
-  overallRiskScore: number; // 0-1 (higher = riskier)
-  businessViabilityScore: number; // 0-1 (higher = healthier)
-  financialResilience: number; // 0-1
-  marketRisk: number; // 0-1
-  operationalRisk: number; // 0-1
+  deterministicMetrics?: {
+    monthlyRevenue?: number | null;
+    monthlyOperatingSurplus?: number | null;
+    candidateEmi?: number | null;
+    businessDscr?: number | null;
+    breakEvenUnits?: number | null;
+    maximumAffordableEmi?: number | null;
+    affordableLoanAmount?: number | null;
+    postLoanHouseholdDebtRatio?: number | null;
+    businessReadiness?: string | null;
+    householdReadiness?: string | null;
+    overallReadiness?: string | null;
+  };
+  marketDataStatus?: 'NO_VERIFIED_DATA' | 'VERIFIED_DATA';
   swot: {
     strengths: { finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }[];
     weaknesses: { finding: string; whyItMatters: string; impact: 'Low' | 'Medium' | 'High'; evidence?: string }[];
@@ -38,11 +52,12 @@ export interface RiskData {
   risks: {
     risk: string;
     category: string;
-    probability: number; // 0-1
+    probability?: number | null;
     impact: 'Low' | 'Medium' | 'High';
     severity: 'Low' | 'Medium' | 'High' | 'Critical';
-    financialExposure: number;
+    financialExposure?: number | null;
     mitigation: string;
+    source?: string;
   }[];
   financials: {
     monthlyRevenue: number;
@@ -54,33 +69,48 @@ export interface RiskData {
   };
   scenarios: {
     name: string;
+    label?: string;
     revenueChange: number;
     costChange: number;
     monthlyRevenue: number;
     monthlyExpenses: number;
     loanEMI: number;
     netCashFlow: number;
+    businessAffordabilityStatus?: string;
+    householdAffordabilityStatus?: string;
+    overallReadiness?: string;
+    readiness?: string;
   }[];
   recommendation: {
-    decision: 'GO' | 'CAUTION' | 'NO-GO';
+    decision: string;
+    decisionLabel?: string;
     rationale: string;
+    disclaimer?: string;
     supportingPoints: string[];
     actionItems: string[];
   };
-  /** Base business inputs — drives the What-If simulator (optional; falls back to financials). */
   baseInputs?: {
     pricePerUnit: number;
     costPerUnit: number;
     salesPerMonth: number;
     monthlyFixed: number;
-    personalCost: number;
+    personalCost?: number;
+    householdEssentialExpenses?: number;
     setupCost: number;
-    loanAmount: number;
-    interestRatePercent: number;
-    loanTenureMonths: number;
+    availableMarginCapital?: number | null;
+    loanAmount?: number | null;
+    interestRatePercent?: number | null;
+    loanTenureMonths?: number | null;
   };
-  /** Pre-computed 12-month cash flow series (optional; synthesized from financials if absent). */
+  provenance?: {
+    userProvided: string[];
+    calculations: string[];
+    governmentRule: string;
+    marketData: string;
+    aiExplanationOnly: boolean;
+  };
   cashFlow?: { month: string; revenue: number; expenses: number; net: number }[];
+  analyticsSnapshot?: AnalyticsSnapshot;
 }
 
 interface RiskAnalysisDashboardProps {
@@ -90,7 +120,7 @@ interface RiskAnalysisDashboardProps {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-/* ── Risk palette (semantic hex, readable in light & dark) ── */
+/* ── Palette (semantic hex, readable in light & dark) ── */
 const R = {
   green: '#639922',
   greenSoft: 'rgba(99,153,34,0.18)',
@@ -107,20 +137,6 @@ const SEVERITY_COLOR: Record<string, string> = {
   High: R.red,
   Critical: '#C62828',
 };
-
-/* Map a 0-1 score to a ThemeColor key so ThemedText accepts it. */
-function scoreThemeColor(score: number): ThemeColor {
-  if (score >= 0.7) return 'textError';
-  if (score >= 0.4) return 'textWarning';
-  return 'textSuccess';
-}
-
-/* Map a 0-1 *viability* score (higher = better) to a ThemeColor key. */
-function viabilityThemeColor(score: number): ThemeColor {
-  if (score >= 0.7) return 'textSuccess';
-  if (score >= 0.4) return 'textWarning';
-  return 'textError';
-}
 
 /* ────────────────────────────────────────────────────────────
  *  Skeleton loading state
@@ -149,34 +165,23 @@ export function RiskDashboardSkeleton() {
 export function RiskAnalysisDashboard({ riskData, loading }: RiskAnalysisDashboardProps) {
   const theme = useTheme();
 
-  const data = useMemo<RiskData | null>(() => {
-    if (!riskData) return null;
-    // Normalize scores into 0-1 so downstream math is safe.
-    const clamp = (n: number) => Math.min(Math.max(n || 0, 0), 1);
-    return {
-      ...riskData,
-      overallRiskScore: clamp(riskData.overallRiskScore),
-      businessViabilityScore: clamp(riskData.businessViabilityScore),
-      financialResilience: clamp(riskData.financialResilience),
-      marketRisk: clamp(riskData.marketRisk),
-      operationalRisk: clamp(riskData.operationalRisk),
-    };
-  }, [riskData]);
-
   if (loading) {
-    return (
-      <View style={styles.container}>
-        <RiskDashboardSkeleton />
-      </View>
-    );
+    return <RiskDashboardSkeleton />;
   }
+
+  const data = riskData;
 
   if (!data) {
     return (
-      <View style={styles.container}>
-        <ThemedView type="backgroundElement" style={styles.emptyState}>
-          <Text style={{ fontSize: 40 }}>📊</Text>
-          <ThemedText type="small" themeColor="textSecondary" style={{ textAlign: 'center', marginTop: Spacing.two }}>
+      <View style={styles.emptyContainer}>
+        <ThemedView
+          type="backgroundElement"
+          style={[styles.emptyCard, { borderColor: theme.backgroundSelected }]}
+        >
+          <ThemedText type="smallBold" themeColor="text" style={{ fontSize: 16, marginBottom: 4 }}>
+            No Risk Data Available
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary" style={{ textAlign: 'center' }}>
             Run the risk test to generate your Reality Check report.
           </ThemedText>
         </ThemedView>
@@ -190,15 +195,13 @@ export function RiskAnalysisDashboard({ riskData, loading }: RiskAnalysisDashboa
       showsVerticalScrollIndicator={false}
       style={{ flexGrow: 1 }}
     >
-      <ExecutiveSummary riskData={data} />
+      <DeterministicMetricsSummary riskData={data} />
       <TopRisks riskData={data} />
       <SwotMatrix riskData={data} />
-      <RiskHeatmap riskData={data} />
       <FinancialStressTest riskData={data} />
       <CashFlowSection riskData={data} />
       <BreakEvenSection riskData={data} />
       <RiskRegister riskData={data} />
-      <RiskContribution riskData={data} />
       <WhatIfSimulator riskData={data} />
       <RecommendationCard riskData={data} />
       <Explainability riskData={data} />
@@ -243,75 +246,127 @@ function Card({ children, style }: { children: React.ReactNode; style?: StylePro
   );
 }
 
-/* ── 1. Executive Risk Summary ── */
-function ExecutiveSummary({ riskData }: { riskData: RiskData }) {
-  const { overallRiskScore, businessViabilityScore, financialResilience, marketRisk, operationalRisk } = riskData;
+/* ── 1. Real Deterministic Metrics Summary (Section N) ── */
+function DeterministicMetricsSummary({ riskData }: { riskData: RiskData }) {
+  const m = riskData.deterministicMetrics || {};
+  const fmtInfo = (val: number | null | undefined, formatter: (n: number) => string, missingMsg = 'Need more information') => {
+    return val !== null && val !== undefined ? formatter(val) : missingMsg;
+  };
+
+  const readinessColor = (status: string | null | undefined): ThemeColor => {
+    if (status === 'READY_FOR_FINANCE_REVIEW' || status === 'PASS' || status === 'SUFFICIENT') return 'textSuccess';
+    if (status === 'HIGH_RISK' || status === 'FAIL' || status === 'EXCESSIVE_DEBT') return 'textError';
+    return 'textWarning';
+  };
 
   return (
-    <Section title="Executive Risk Summary" subtitle="Overall viability & risk posture">
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryGaugeCard}>
-          <ThemedText type="smallBold" style={{ color: '#1F1F1F', marginBottom: 10 }}>
-            Overall Risk
-          </ThemedText>
-          <GoNoGoGauge riskRatio={overallRiskScore} size={190} />
+    <Section title="Deterministic Financial Readiness" subtitle="Calculated from confirmed plan inputs against policy benchmarks">
+      <Card style={{ padding: Spacing.two }}>
+        {/* Core Business Metrics */}
+        <ThemedText type="smallBold" themeColor="text" style={{ marginBottom: 8, fontSize: 13, textTransform: 'uppercase' }}>
+          Business Economics
+        </ThemedText>
+        <View style={styles.metricsGrid}>
+          <MetricCell
+            label="Monthly Revenue"
+            value={fmtInfo(m.monthlyRevenue, formatINR)}
+          />
+          <MetricCell
+            label="Operating Surplus (before EMI)"
+            value={fmtInfo(m.monthlyOperatingSurplus, formatINR)}
+            tone={m.monthlyOperatingSurplus != null && m.monthlyOperatingSurplus > 0 ? 'textSuccess' : 'textError'}
+          />
+          <MetricCell
+            label="Break-even Units"
+            value={fmtInfo(m.breakEvenUnits, n => `${n} units`)}
+          />
+          <MetricCell
+            label="Business Readiness"
+            value={m.businessReadiness || 'Need more information'}
+            tone={readinessColor(m.businessReadiness)}
+          />
         </View>
 
-        <View style={styles.summaryMetrics}>
-          <MetricChip
-            label="Business Viability"
-            value={`${Math.round(businessViabilityScore * 100)}%`}
-            tone={viabilityThemeColor(businessViabilityScore)}
+        {/* Financing Metrics */}
+        <View style={styles.sectionDivider} />
+        <ThemedText type="smallBold" themeColor="text" style={{ marginBottom: 8, fontSize: 13, textTransform: 'uppercase' }}>
+          Financing & Debt Service
+        </ThemedText>
+        <View style={styles.metricsGrid}>
+          <MetricCell
+            label="Candidate EMI"
+            value={fmtInfo(m.candidateEmi, formatINR, 'Need financing terms')}
           />
-          <MetricChip
-            label="Financial Resilience"
-            value={`${Math.round(financialResilience * 100)}%`}
-            tone={viabilityThemeColor(financialResilience)}
+          <MetricCell
+            label="Business DSCR"
+            value={fmtInfo(m.businessDscr, n => n.toFixed(2), 'Need financing terms')}
+            tone={m.businessDscr != null && m.businessDscr >= 1.25 ? 'textSuccess' : 'textError'}
           />
-          <MetricChip
-            label="Market Risk"
-            value={`${Math.round(marketRisk * 100)}%`}
-            tone={scoreThemeColor(marketRisk)}
+          <MetricCell
+            label="Max Affordable EMI"
+            value={fmtInfo(m.maximumAffordableEmi, formatINR)}
           />
-          <MetricChip
-            label="Operational Risk"
-            value={`${Math.round(operationalRisk * 100)}%`}
-            tone={scoreThemeColor(operationalRisk)}
+          <MetricCell
+            label="Affordable Loan Amount"
+            value={fmtInfo(m.affordableLoanAmount, formatINR)}
           />
         </View>
-      </View>
+
+        {/* Household & Overall */}
+        <View style={styles.sectionDivider} />
+        <ThemedText type="smallBold" themeColor="text" style={{ marginBottom: 8, fontSize: 13, textTransform: 'uppercase' }}>
+          Household & Overall Readiness
+        </ThemedText>
+        <View style={styles.metricsGrid}>
+          <MetricCell
+            label="Household Debt Ratio"
+            value={fmtInfo(m.postLoanHouseholdDebtRatio, n => `${(n * 100).toFixed(0)}%`, 'Need household data')}
+            tone={m.postLoanHouseholdDebtRatio != null && m.postLoanHouseholdDebtRatio <= 0.50 ? 'textSuccess' : 'textError'}
+          />
+          <MetricCell
+            label="Household Readiness"
+            value={m.householdReadiness || 'Need more information'}
+            tone={readinessColor(m.householdReadiness)}
+          />
+          <MetricCell
+            label="Overall Readiness"
+            value={m.overallReadiness || 'Need more information'}
+            tone={readinessColor(m.overallReadiness)}
+          />
+        </View>
+      </Card>
     </Section>
   );
 }
 
-function MetricChip({ label, value, tone }: { label: string; value: string; tone: ThemeColor }) {
+function MetricCell({ label, value, tone = 'text' }: { label: string; value: string; tone?: ThemeColor }) {
   const theme = useTheme();
   return (
-    <View style={[styles.metricChip, { backgroundColor: theme.backgroundElement }]}>
-      <ThemedText type="small" themeColor="textSecondary" style={{ flex: 1, marginRight: 8 }}>
+    <View style={[styles.metricCell, { backgroundColor: theme.backgroundElement }]}>
+      <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={{ fontSize: 11 }}>
         {label}
       </ThemedText>
-      <ThemedText type="default" themeColor={tone} style={{ fontWeight: '700' }}>
+      <ThemedText type="smallBold" themeColor={tone} style={{ fontSize: 14, marginTop: 4 }}>
         {value}
       </ThemedText>
     </View>
   );
 }
 
-/* ── 2. Top 3 Critical Risks ── */
+/* ── 2. Top Critical Risks (Evidence-backed only, Section O) ── */
 function TopRisks({ riskData }: { riskData: RiskData }) {
   const sorted = [...riskData.risks].sort(
-    (a, b) => severityRank(b.severity) - severityRank(a.severity) || b.probability - a.probability
+    (a, b) => severityRank(b.severity) - severityRank(a.severity)
   );
   const top = sorted.slice(0, 3);
   if (top.length === 0) return null;
 
   return (
-    <Section title="Top 3 Critical Risks" subtitle="Address these before taking the loan">
+    <Section title="Critical Risk Findings" subtitle="Address these before finalizing business operations">
       {top.map((risk, i) => (
         <Card key={i} style={styles.criticalRiskCard}>
           <View style={styles.criticalHeader}>
-            <View style={[styles.rankBadge, { backgroundColor: SEVERITY_COLOR[risk.severity] }]}>
+            <View style={[styles.rankBadge, { backgroundColor: SEVERITY_COLOR[risk.severity] || R.amber }]}>
               <Text style={styles.rankBadgeText}>{i + 1}</Text>
             </View>
             <View style={{ flex: 1 }}>
@@ -319,7 +374,8 @@ function TopRisks({ riskData }: { riskData: RiskData }) {
                 {risk.risk}
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
-                {risk.category} · Probability {Math.round(risk.probability * 100)}%
+                {risk.category}
+                {risk.probability != null ? ` · Probability ${Math.round(risk.probability * 100)}%` : ''}
               </ThemedText>
             </View>
             <ThemedText
@@ -331,17 +387,19 @@ function TopRisks({ riskData }: { riskData: RiskData }) {
             </ThemedText>
           </View>
           <View style={styles.criticalBody}>
+            {risk.financialExposure != null && risk.financialExposure > 0 ? (
+              <View style={styles.criticalStat}>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Financial exposure
+                </ThemedText>
+                <ThemedText type="smallBold" themeColor="text">
+                  {formatINR(risk.financialExposure)}
+                </ThemedText>
+              </View>
+            ) : null}
             <View style={styles.criticalStat}>
               <ThemedText type="small" themeColor="textSecondary">
-                Financial exposure
-              </ThemedText>
-              <ThemedText type="smallBold" themeColor="text">
-                {formatINR(risk.financialExposure)}
-              </ThemedText>
-            </View>
-            <View style={styles.criticalStat}>
-              <ThemedText type="small" themeColor="textSecondary">
-                Mitigation
+                Detail
               </ThemedText>
               <ThemedText type="small" themeColor="text" style={{ flexShrink: 1 }}>
                 {risk.mitigation}
@@ -354,18 +412,20 @@ function TopRisks({ riskData }: { riskData: RiskData }) {
   );
 }
 
-/* ── 3. Risk Register (Mobile-first Stacked Cards) ── */
+/* ── 3. Risk Register (Evidence-backed only, Section O) ── */
 function RiskRegister({ riskData }: { riskData: RiskData }) {
   if (riskData.risks.length === 0) return null;
 
   return (
-    <Section title="Risk Register" subtitle="Quantified risks with exposure and mitigation">
+    <Section title="Risk Register" subtitle="Documented risk findings and mitigations">
       <View style={styles.riskCardList}>
         {riskData.risks.map((risk, i) => {
           const sevColor = SEVERITY_COLOR[risk.severity] || R.amber;
+          const hasExposure = risk.financialExposure != null && risk.financialExposure > 0;
+          const hasProbability = risk.probability != null;
+
           return (
             <Card key={i} style={[styles.mobileRiskCard, { borderLeftColor: sevColor, borderLeftWidth: 4 }]}>
-              {/* Header: Risk title, category & severity pill */}
               <View style={styles.mobileRiskHeader}>
                 <View style={{ flex: 1, paddingRight: 8 }}>
                   <ThemedText type="smallBold" themeColor="text" style={{ fontSize: 15, lineHeight: 20 }}>
@@ -384,43 +444,47 @@ function RiskRegister({ riskData }: { riskData: RiskData }) {
                 </View>
               </View>
 
-              {/* Stats row: Probability, Impact, Financial Exposure */}
-              <View style={styles.mobileRiskStatsRow}>
-                <View style={styles.mobileRiskStatItem}>
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
-                    Probability
-                  </ThemedText>
-                  <ThemedText type="smallBold" themeColor="text" style={styles.statMiniValue}>
-                    {Math.round(risk.probability * 100)}%
-                  </ThemedText>
-                </View>
+              {(hasProbability || hasExposure) && (
+                <View style={styles.mobileRiskStatsRow}>
+                  {hasProbability && (
+                    <View style={styles.mobileRiskStatItem}>
+                      <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
+                        Probability
+                      </ThemedText>
+                      <ThemedText type="smallBold" themeColor="text" style={styles.statMiniValue}>
+                        {Math.round(risk.probability! * 100)}%
+                      </ThemedText>
+                    </View>
+                  )}
 
-                <View style={styles.mobileRiskStatItem}>
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
-                    Impact
-                  </ThemedText>
-                  <ThemedText type="smallBold" themeColor="text" style={styles.statMiniValue}>
-                    {risk.impact}
-                  </ThemedText>
-                </View>
+                  <View style={styles.mobileRiskStatItem}>
+                    <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
+                      Impact
+                    </ThemedText>
+                    <ThemedText type="smallBold" themeColor="text" style={styles.statMiniValue}>
+                      {risk.impact}
+                    </ThemedText>
+                  </View>
 
-                <View style={styles.mobileRiskStatItem}>
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
-                    Exposure
-                  </ThemedText>
-                  <ThemedText type="smallBold" themeColor="textError" style={styles.statMiniValue}>
-                    {formatINR(risk.financialExposure)}
-                  </ThemedText>
+                  {hasExposure && (
+                    <View style={styles.mobileRiskStatItem}>
+                      <ThemedText type="small" themeColor="textSecondary" style={styles.statMiniLabel}>
+                        Exposure
+                      </ThemedText>
+                      <ThemedText type="smallBold" themeColor="textError" style={styles.statMiniValue}>
+                        {formatINR(risk.financialExposure!)}
+                      </ThemedText>
+                    </View>
+                  )}
                 </View>
-              </View>
+              )}
 
-              {/* Mitigation Box */}
               {risk.mitigation ? (
                 <View style={styles.mobileMitigationBox}>
                   <Text style={styles.mitigationShieldIcon}>🛡️</Text>
                   <View style={{ flex: 1 }}>
                     <ThemedText type="smallBold" themeColor="textSecondary" style={{ fontSize: 11, marginBottom: 2 }}>
-                      Mitigation Strategy
+                      Detail / Mitigation
                     </ThemedText>
                     <ThemedText type="small" themeColor="text" style={{ fontSize: 12, lineHeight: 17 }}>
                       {risk.mitigation}
@@ -436,176 +500,48 @@ function RiskRegister({ riskData }: { riskData: RiskData }) {
   );
 }
 
-/* ── 4. SWOT 2×2 Matrix ── */
+/* ── 4. SWOT Matrix ── */
 function SwotMatrix({ riskData }: { riskData: RiskData }) {
+  const { swot } = riskData;
   const quadrants = [
-    { key: 'strengths', title: 'Strengths', sign: 'Internal +', color: R.green },
-    { key: 'weaknesses', title: 'Weaknesses', sign: 'Internal −', color: R.red },
-    { key: 'opportunities', title: 'Opportunities', sign: 'External +', color: R.green },
-    { key: 'threats', title: 'Threats', sign: 'External −', color: R.red },
-  ] as const;
+    { title: 'Strengths', items: swot.strengths, color: R.green },
+    { title: 'Weaknesses', items: swot.weaknesses, color: R.red },
+    { title: 'Opportunities', items: swot.opportunities, color: '#1E88E5' },
+    { title: 'Threats', items: swot.threats, color: R.amber },
+  ];
 
   return (
-    <Section title="SWOT Analysis" subtitle="Internal & external factors at a glance">
+    <Section title="SWOT Analysis" subtitle="Dynamic strategic analysis from your numbers">
       <View style={styles.swotGrid}>
-        {quadrants.map((q) => {
-          const items = riskData.swot[q.key];
-          return (
-            <View key={q.key} style={[styles.swotQuadrant, { borderTopColor: q.color }]}>
-              <View style={styles.swotHeader}>
-                <ThemedText type="smallBold" style={{ color: '#1F1F1F' }}>
-                  {q.title.toUpperCase()}
-                </ThemedText>
-                <ThemedText type="small" style={{ color: '#60646C' }}>
-                  {q.sign}
-                </ThemedText>
-              </View>
-              {items.length === 0 ? (
-                <ThemedText type="small" style={{ color: '#60646C' }}>
-                  No items identified
-                </ThemedText>
-              ) : (
-                items.map((item, i) => (
-                  <View key={i} style={styles.swotItem}>
-                    <ThemedText type="small" style={{ fontWeight: '600', color: '#1F1F1F' }}>
-                      • {item.finding}
-                    </ThemedText>
-                    {item.whyItMatters ? (
-                      <ThemedText type="small" style={{ color: '#60646C' }}>
-                        {item.whyItMatters}
-                      </ThemedText>
-                    ) : null}
-                    <View style={styles.swotMeta}>
-                      <View style={[styles.impactPill, { backgroundColor: impactSoft(item.impact) }]}>
-                        <Text style={[styles.impactPillText, { color: impactHex(item.impact) }]}>
-                          {item.impact} impact
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                ))
-              )}
+        {quadrants.map((q, idx) => (
+          <View key={idx} style={[styles.swotQuadrant, { borderTopColor: q.color }]}>
+            <View style={styles.swotHeader}>
+              <ThemedText type="smallBold" themeColor="text">
+                {q.title}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                ({q.items.length})
+              </ThemedText>
             </View>
-          );
-        })}
-      </View>
-    </Section>
-  );
-}
-
-/* ── 4. Risk Heatmap (Probability × Impact) ── */
-function RiskHeatmap({ riskData }: { riskData: RiskData }) {
-  const theme = useTheme();
-  const isDark = theme.background === '#000000';
-  const axisLabel = isDark ? '#B0B4BA' : '#60646C';
-  const cellEmpty = isDark ? '#212225' : '#F0F0F3';
-  const risks = riskData.risks;
-  if (risks.length === 0) return null;
-
-  const IMPACT_LEVELS = ['Very Low', 'Low', 'Medium', 'High', 'Critical'];
-  const PROB_LABELS = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%'];
-  const CELL = 42;
-  const W = 5 * CELL;
-  const H = 5 * CELL;
-  const LEFT = 46;
-  const TOP = 18;
-  const BOTTOM = 30;
-
-  // Impact index per risk (VeryLow=0 … Critical=4)
-  const impactIndex = (impact: string) => {
-    if (impact === 'Low') return 1;
-    if (impact === 'Medium') return 2;
-    if (impact === 'High') return 3;
-    return 4;
-  };
-
-  // Probability bucket row (row 0 = top / 80-100%)
-  const probRow = (p: number) => {
-    const b = Math.min(Math.floor(p * 5), 4); // 0..4
-    return 4 - b;
-  };
-
-  return (
-    <Section title="Risk Heatmap" subtitle="Probability × Impact — darker = higher severity">
-      <Card>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View>
-            <Svg width={LEFT + W + 4} height={TOP + H + BOTTOM}>
-              {/* Column headers (Impact) */}
-              {IMPACT_LEVELS.map((label, i) => (
-                <SvgText
-                  key={`hx-${i}`}
-                  x={LEFT + i * CELL + CELL / 2}
-                  y={10}
-                  fontSize={9}
-                  fill={axisLabel}
-                  textAnchor="middle"
-                >
-                  {label}
-                </SvgText>
-              ))}
-
-              {/* Grid + risk markers */}
-              {IMPACT_LEVELS.map((_, col) =>
-                PROB_LABELS.map((_, row) => {
-                  const x = LEFT + col * CELL;
-                  const y = TOP + row * CELL;
-                  const cellRisks = risks.filter(
-                    (r) => impactIndex(r.impact) === col && probRow(r.probability) === row
-                  );
-                  const worst = cellRisks.length
-                    ? cellRisks.reduce((a, b) => (severityRank(b.severity) > severityRank(a.severity) ? b : a))
-                    : null;
-                  return (
-                    <React.Fragment key={`${col}-${row}`}>
-                      <Rect
-                        x={x}
-                        y={y}
-                        width={CELL - 2}
-                        height={CELL - 2}
-                        rx={4}
-                        fill={worst ? SEVERITY_COLOR[worst.severity] : cellEmpty}
-                        opacity={worst ? 0.85 : 1}
-                      />
-                      {cellRisks.length > 0 && (
-                        <Circle cx={x + (CELL - 2) / 2} cy={y + (CELL - 2) / 2} r={3} fill="#ffffff" opacity={0.9} />
-                      )}
-                    </React.Fragment>
-                  );
-                })
-              )}
-
-              {/* Row headers (Probability) */}
-              {PROB_LABELS.map((label, row) => (
-                <SvgText
-                  key={`hy-${row}`}
-                  x={LEFT - 4}
-                  y={TOP + row * CELL + CELL / 2 + 3}
-                  fontSize={9}
-                  fill={axisLabel}
-                  textAnchor="end"
-                >
-                  {label}
-                </SvgText>
-              ))}
-
-              {/* Legend dots */}
-              <Circle cx={LEFT + 10} cy={TOP + H + 16} r={4} fill={R.green} />
-              <SvgText x={LEFT + 18} y={TOP + H + 20} fontSize={9} fill="#60646C">
-                Low
-              </SvgText>
-              <Circle cx={LEFT + 60} cy={TOP + H + 16} r={4} fill={R.amber} />
-              <SvgText x={LEFT + 68} y={TOP + H + 20} fontSize={9} fill="#60646C">
-                Med
-              </SvgText>
-              <Circle cx={LEFT + 108} cy={TOP + H + 16} r={4} fill={R.red} />
-              <SvgText x={LEFT + 116} y={TOP + H + 20} fontSize={9} fill="#60646C">
-                High
-              </SvgText>
-            </Svg>
+            {q.items.length === 0 ? (
+              <ThemedText type="small" themeColor="textSecondary" style={{ fontStyle: 'italic', marginTop: 4 }}>
+                None noted
+              </ThemedText>
+            ) : (
+              q.items.map((it, i) => (
+                <View key={i} style={styles.swotItem}>
+                  <ThemedText type="small" themeColor="text" style={{ fontWeight: '600' }}>
+                    • {it.finding}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.swotMeta}>
+                    {it.whyItMatters}
+                  </ThemedText>
+                </View>
+              ))
+            )}
           </View>
-        </ScrollView>
-      </Card>
+        ))}
+      </View>
     </Section>
   );
 }
@@ -615,7 +551,7 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
   if (riskData.scenarios.length === 0) return null;
 
   return (
-    <Section title="Financial Stress Test" subtitle="How the business holds up under revenue loss / cost shock">
+    <Section title="Financial Stress Test" subtitle="Deterministic sensitivity under demand shock and cost increase">
       <View style={styles.stressGrid}>
         {riskData.scenarios.map((s, i) => {
           const healthy = s.netCashFlow >= 0;
@@ -623,7 +559,7 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
             <Card key={i} style={[styles.scenarioCard, { borderLeftColor: healthy ? R.green : R.red, borderLeftWidth: 3 }]}>
               <View style={styles.scenarioHeader}>
                 <ThemedText type="smallBold" themeColor="text">
-                  {s.name}
+                  {s.label || s.name}
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
                   Rev {s.revenueChange > 0 ? '+' : ''}{s.revenueChange}% · Cost {s.costChange > 0 ? '+' : ''}{s.costChange}%
@@ -669,7 +605,7 @@ function MetricPair({
 }) {
   return (
     <View style={styles.metricPair}>
-      <ThemedText type="small" themeColor="textSecondary">
+      <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
         {label}
       </ThemedText>
       <ThemedText type="smallBold" themeColor={valueTone}>
@@ -679,132 +615,106 @@ function MetricPair({
   );
 }
 
-/* ── 6. Cash Flow / Profitability (12-month SVG chart) ── */
+/* ── 6. Cash Flow Projection ── */
 function CashFlowSection({ riskData }: { riskData: RiskData }) {
-  const theme = useTheme();
-  const gridColor = theme.background === '#000000' ? '#2E3135' : '#E0E1E6';
-  const series = useMemo(() => buildCashFlowSeries(riskData), [riskData]);
-  const W = Math.min(SCREEN_WIDTH - 64, 340);
-  const H = 180;
-  const PAD = { top: 16, right: 10, bottom: 26, left: 44 };
-  const innerW = W - PAD.left - PAD.right;
-  const innerH = H - PAD.top - PAD.bottom;
+  const series = riskData.cashFlow ?? buildCashFlowSeries(riskData);
 
-  const allVals = series.flatMap((s) => [s.revenue, s.expenses, s.net]);
-  const max = Math.max(...allVals.map((v) => Math.abs(v))) * 1.1 || 1;
-  const min = Math.min(...allVals.map((v) => Math.abs(v))) * -1.1;
-  const yMin = Math.min(min, -max * 0.05);
-  const yMax = max;
+  const W = Math.min(SCREEN_WIDTH - 64, 380);
+  const H = 140;
+  const pad = 24;
+  const innerW = W - pad * 2;
+  const innerH = H - pad * 2;
 
-  const xAt = (i: number) => PAD.left + (innerW * i) / Math.max(series.length - 1, 1);
-  const yAt = (v: number) => PAD.top + innerH - ((v - yMin) / (yMax - yMin || 1)) * innerH;
+  const maxVal = Math.max(...series.map((d) => Math.max(d.revenue, d.expenses)), 1000);
+  const minNet = Math.min(...series.map((d) => d.net), 0);
+  const maxNet = Math.max(...series.map((d) => d.net), 1000);
+  const netRange = maxNet - minNet || 1;
 
-  const revenuePts = series.map((s, i) => `${xAt(i)},${yAt(s.revenue)}`).join(' ');
-  const netPts = series.map((s, i) => `${xAt(i)},${yAt(s.net)}`).join(' ');
-
-  const gridLines = [0.25, 0.5, 0.75, 1].map((t) => {
-    const y = PAD.top + innerH - t * innerH;
-    const val = yMin + (yMax - yMin) * t;
-    return { y, val };
-  });
+  const xStep = innerW / (series.length - 1);
+  const revPoints = series
+    .map((d, i) => `${pad + i * xStep},${pad + innerH - (d.revenue / maxVal) * innerH}`)
+    .join(' ');
+  const expPoints = series
+    .map((d, i) => `${pad + i * xStep},${pad + innerH - (d.expenses / maxVal) * innerH}`)
+    .join(' ');
+  const netPoints = series
+    .map((d, i) => `${pad + i * xStep},${pad + innerH - ((d.net - minNet) / netRange) * innerH}`)
+    .join(' ');
 
   return (
-    <Section title="Cash Flow & Profitability" subtitle="12-month revenue, expenses and net cash flow projection">
+    <Section title="Cash Flow Projection" subtitle="12-month projection based on confirmed unit economics">
       <Card>
         <Svg width={W} height={H}>
-          {/* Grid + Y labels */}
-          {gridLines.map((g, i) => (
-            <React.Fragment key={i}>
-              <Line x1={PAD.left} y1={g.y} x2={W - PAD.right} y2={g.y} stroke={gridColor} strokeWidth={1} />
-              <SvgText x={PAD.left - 6} y={g.y + 3} fontSize={9} fill="#60646C" textAnchor="end">
-                {compactINR(g.val)}
-              </SvgText>
-            </React.Fragment>
+          <Line x1={pad} y1={H - pad} x2={W - pad} y2={H - pad} stroke="rgba(150,150,150,0.3)" strokeWidth={1} />
+          <Polyline points={revPoints} fill="none" stroke={R.green} strokeWidth={2} />
+          <Polyline points={expPoints} fill="none" stroke={R.red} strokeWidth={2} strokeDasharray="4,4" />
+          <Polyline points={netPoints} fill="none" stroke={R.amber} strokeWidth={2} />
+
+          {series.map((d, i) => (
+            <Circle
+              key={i}
+              cx={pad + i * xStep}
+              cy={pad + innerH - ((d.net - minNet) / netRange) * innerH}
+              r={2.5}
+              fill={R.amber}
+            />
           ))}
-
-          {/* Zero baseline */}
-          <Line x1={PAD.left} y1={yAt(0)} x2={W - PAD.right} y2={yAt(0)} stroke={R.slate} strokeWidth={1.5} strokeDasharray="4 3" />
-
-          {/* Revenue area */}
-          <Polygon
-            points={`${PAD.left},${yAt(0)} ${revenuePts} ${PAD.left + innerW},${yAt(0)}`}
-            fill={R.greenSoft}
-            stroke="none"
-          />
-          <Polyline points={revenuePts} fill="none" stroke={R.green} strokeWidth={2.5} />
-
-          {/* Net cash flow line */}
-          <Polyline points={netPts} fill="none" stroke={R.amber} strokeWidth={2.5} />
-
-          {/* X labels */}
-          {series.map((s, i) =>
-            i % 2 === 0 ? (
-              <SvgText key={i} x={xAt(i)} y={H - 8} fontSize={9} fill="#60646C" textAnchor="middle">
-                {s.month}
-              </SvgText>
-            ) : null
-          )}
         </Svg>
 
-        {/* Legend */}
         <View style={styles.chartLegend}>
           <LegendDot color={R.green} label="Revenue" />
-          <LegendDot color={R.amber} label="Net cash flow" />
-          <LegendDot color={R.slate} label="Break-even line" />
+          <LegendDot color={R.red} label="Expenses" dashed />
+          <LegendDot color={R.amber} label="Net" />
         </View>
       </Card>
     </Section>
   );
 }
 
-/* ── 7. Break-even Analysis ── */
+/* ── 7. Break-Even Analysis ── */
 function BreakEvenSection({ riskData }: { riskData: RiskData }) {
-  const { monthlyRevenue, breakEvenRevenue, netCashFlow, safetyMargin } = riskData.financials;
-  const ratio = breakEvenRevenue > 0 ? monthlyRevenue / breakEvenRevenue : 1;
-  const reached = monthlyRevenue >= breakEvenRevenue;
-  const W = Math.min(SCREEN_WIDTH - 64, 340);
+  const f = riskData.financials;
+  const breakEven = f.breakEvenRevenue;
+  const actual = f.monthlyRevenue;
+  const safe = actual >= breakEven;
+  const ratio = breakEven > 0 ? actual / breakEven : 0;
+  const max = Math.max(breakEven, actual) * 1.25 || 1;
+
+  const actualPct = Math.min((actual / max) * 100, 100);
+  const bePct = Math.min((breakEven / max) * 100, 100);
 
   return (
-    <Section title="Break-even Analysis" subtitle="Revenue required to cover all fixed + variable costs">
+    <Section title="Break-Even Analysis" subtitle="Minimum monthly sales to cover all business costs">
       <Card>
         <View style={styles.beRow}>
-          <View style={{ flex: 1 }}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Current revenue
-            </ThemedText>
-            <ThemedText type="default" themeColor="text" style={{ fontWeight: '700' }}>
-              {formatINR(monthlyRevenue)}
-            </ThemedText>
-          </View>
-          <View style={{ flex: 1, alignItems: 'flex-end' }}>
-            <ThemedText type="small" themeColor="textSecondary">
-              Break-even
-            </ThemedText>
-            <ThemedText type="default" themeColor={reached ? 'textSuccess' : 'textError'} style={{ fontWeight: '700' }}>
-              {formatINR(breakEvenRevenue)}
-            </ThemedText>
-          </View>
+          <MetricPair label="Actual revenue" value={formatINR(actual)} />
+          <MetricPair label="Break-even revenue" value={formatINR(breakEven)} />
+          <MetricPair
+            label="Safety margin"
+            value={formatINR(f.safetyMargin)}
+            valueTone={safe ? 'textSuccess' : 'textError'}
+          />
         </View>
 
-        {/* Meter: where current revenue sits vs break-even */}
         <View style={styles.beMeter}>
           <View
             style={[
               styles.beMeterFill,
-              { width: `${Math.min(ratio * 100, 100)}%`, backgroundColor: reached ? R.green : R.amber },
+              { width: `${actualPct}%`, backgroundColor: safe ? R.greenSoft : R.redSoft },
             ]}
           />
-          <View style={[styles.beMeterMark, { left: '100%' }]} />
+          <View style={[styles.beMeterMark, { left: `${bePct}%` }]} />
         </View>
         <View style={styles.beLabels}>
-          <Text style={styles.beLabelText}>0</Text>
-          <Text style={styles.beLabelText}>{formatINR(breakEvenRevenue)}</Text>
-          <Text style={styles.beLabelText}>{formatINR(Math.max(monthlyRevenue, breakEvenRevenue) * 1.1)}</Text>
-        </View>
-
-        <View style={styles.beStatsRow}>
-          <StatPill label="Safety margin" value={formatINR(safetyMargin)} positive={safetyMargin >= 0} />
-          <StatPill label="Monthly net flow" value={formatINR(netCashFlow)} positive={netCashFlow >= 0} />
+          <ThemedText type="small" themeColor="textSecondary">
+            0
+          </ThemedText>
+          <ThemedText type="smallBold" themeColor="text">
+            Break-even: {formatINR(breakEven)}
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {formatINR(max)}
+          </ThemedText>
         </View>
       </Card>
     </Section>
@@ -824,108 +734,85 @@ function StatPill({ label, value, positive }: { label: string; value: string; po
   );
 }
 
-/* ── 8. Risk Contribution by Category ── */
-function RiskContribution({ riskData }: { riskData: RiskData }) {
-  const contributions = useMemo(() => {
-    const acc: Record<string, number> = {};
-    riskData.risks.forEach((r) => {
-      const weight = severityRank(r.severity) * r.probability;
-      acc[r.category] = (acc[r.category] || 0) + weight;
-    });
-    const entries = Object.entries(acc).sort((a, b) => b[1] - a[1]);
-    const maxScore = Math.max(...entries.map(([, v]) => v), 1);
-    return entries.map(([name, score]) => ({ name, score, pct: (score / maxScore) * 100 }));
-  }, [riskData]);
-
-  if (contributions.length === 0) return null;
-
-  return (
-    <Section title="Risk Contribution by Category" subtitle="Which category drives the most overall risk">
-      <Card>
-        {contributions.map((c, i) => (
-          <View key={i} style={styles.contributionRow}>
-            <ThemedText type="small" themeColor="textSecondary" style={{ width: 96 }}>
-              {c.name}
-            </ThemedText>
-            <View style={styles.contributionBar}>
-              <View
-                style={[styles.contributionFill, { width: `${c.pct}%`, backgroundColor: categoryColor(c.name) }]}
-              />
-            </View>
-            <ThemedText type="smallBold" themeColor="text" style={{ width: 48, textAlign: 'right' }}>
-              {c.score.toFixed(1)}
-            </ThemedText>
-          </View>
-        ))}
-      </Card>
-    </Section>
-  );
-}
-
-/* ── 9. What-If Simulator ── */
+/* ── 8. What-If Simulator (Sections Q & R: strictly uses FinanceEngine) ── */
 function WhatIfSimulator({ riskData }: { riskData: RiskData }) {
-  const f = riskData.financials;
-  // Safety-net defaults if baseInputs is somehow missing.
-  // The canonical analytics pipeline always provides real baseInputs.
-  const fallback = {
-    pricePerUnit: 0,
-    costPerUnit: 0,
-    salesPerMonth: 0,
-    monthlyFixed: 0,
-    personalCost: 0,
-    setupCost: 0,
-    loanAmount: 0,
-    interestRatePercent: 0,
-    loanTenureMonths: 0,
-  };
-  const base = riskData.baseInputs ?? fallback;
+  const base = riskData.baseInputs;
+  const initialPrice = base?.pricePerUnit ?? 40;
+  const initialCost = base?.costPerUnit ?? 18;
+  const initialSales = base?.salesPerMonth ?? 500;
+  const initialFixed = base?.monthlyFixed ?? 4000;
+  const initialMargin = base?.availableMarginCapital ?? 10000;
 
-  const [price, setPrice] = useState(base.pricePerUnit);
-  const [cost, setCost] = useState(base.costPerUnit);
-  const [sales, setSales] = useState(base.salesPerMonth);
-  const [fixed, setFixed] = useState(base.monthlyFixed);
-  const [loan, setLoan] = useState(base.loanAmount);
+  const [price, setPrice] = useState(initialPrice);
+  const [cost, setCost] = useState(initialCost);
+  const [sales, setSales] = useState(initialSales);
+  const [fixed, setFixed] = useState(initialFixed);
+  const [margin, setMargin] = useState(initialMargin);
 
-  const sim = useMemo(() => {
-    const revenue = sales * price;
-    const variable = sales * cost;
-    const expenses = variable + fixed;
-    const r = (base.interestRatePercent || 12) / 12 / 100;
-    const emi = loan > 0 && base.loanTenureMonths > 0
-      ? (loan * r * Math.pow(1 + r, base.loanTenureMonths)) / (Math.pow(1 + r, base.loanTenureMonths) - 1)
-      : 0;
-    const net = revenue - expenses - emi;
-    const breakEven = expenses + emi;
-    const margin = revenue > 0 ? net / revenue : 0;
-    return { revenue, expenses, emi, net, breakEven, margin };
-  }, [price, cost, sales, fixed, loan, base]);
+  const simSnapshot = useMemo(() => {
+    const modifiedPlan: BusinessPlanInputs = {
+      ...(riskData.analyticsSnapshot?.inputs || {}),
+      sellingPricePerUnit: price,
+      variableCostPerUnit: cost,
+      monthlyUnitsSold: sales,
+      monthlyBusinessFixedCost: fixed,
+      availableMarginCapital: margin > 0 ? margin : null,
+    };
+    return generateAnalyticsSnapshot(modifiedPlan);
+  }, [price, cost, sales, fixed, margin, riskData.analyticsSnapshot?.inputs]);
 
-  const healthy = sim.net >= 0;
+  const rev = simSnapshot.monthlyRevenue ?? (sales * price);
+  const surplus = simSnapshot.operatingSurplus ?? (rev - (sales * cost) - fixed);
+  const emi = simSnapshot.candidateEmi;
+  const dscr = simSnapshot.businessDscr;
+  const breakEvenUnits = simSnapshot.breakEvenUnits;
+  const breakEvenStatus = simSnapshot.breakEvenStatus;
+  const breakEvenRev = (breakEvenStatus === 'VIABLE' && breakEvenUnits != null) ? breakEvenUnits * price : null;
+  const isSurplusPositive = surplus > 0;
+  const meetsDscr = dscr != null && dscr >= 1.25;
 
   return (
-    <Section title="What-If Simulator" subtitle="Drag the sliders to stress-test your plan">
+    <Section title="What-If Simulator" subtitle="Stress-test using the canonical Finance Engine">
       <Card>
         <View style={styles.simSummary}>
-          <StatPill label="Projected revenue" value={formatINR(sim.revenue)} positive />
-          <StatPill label="Net cash flow" value={formatINR(sim.net)} positive={healthy} />
-          <StatPill label="Break-even" value={formatINR(sim.breakEven)} positive={sim.revenue >= sim.breakEven} />
+          <StatPill label="Projected revenue" value={formatINR(rev)} positive={rev > 0} />
+          <StatPill label="Operating surplus" value={formatINR(surplus)} positive={isSurplusPositive} />
+          <StatPill
+            label="Break-even"
+            value={breakEvenStatus === 'VIABLE' && breakEvenUnits != null ? `${breakEvenUnits} units` : (breakEvenStatus || 'Unviable')}
+            positive={breakEvenStatus === 'VIABLE' && sales >= (breakEvenUnits || 0)}
+          />
         </View>
 
-        <SimSlider label="Selling price / unit" value={price} min={5} max={200} step={1} onChange={setPrice} prefix="₹" />
-        <SimSlider label="Cost / unit" value={cost} min={1} max={150} step={1} onChange={setCost} prefix="₹" />
-        <SimSlider label="Units sold / month" value={sales} min={50} max={5000} step={50} onChange={setSales} />
-        <SimSlider label="Monthly fixed costs" value={fixed} min={0} max={50000} step={500} onChange={setFixed} prefix="₹" />
-        <SimSlider label="Loan amount" value={loan} min={0} max={2000000} step={10000} onChange={setLoan} prefix="₹" />
+        <View style={{ flexDirection: 'row', gap: 10, marginVertical: 8 }}>
+          <View style={[styles.statPill, { flex: 1 }]}>
+            <ThemedText type="small" themeColor="textSecondary">Candidate EMI</ThemedText>
+            <ThemedText type="smallBold" themeColor="text">
+              {emi != null ? formatINR(emi) : 'Need financing terms'}
+            </ThemedText>
+          </View>
+          <View style={[styles.statPill, { flex: 1 }]}>
+            <ThemedText type="small" themeColor="textSecondary">Business DSCR</ThemedText>
+            <ThemedText type="smallBold" themeColor={meetsDscr ? 'textSuccess' : 'textError'}>
+              {dscr != null ? dscr.toFixed(2) : 'N/A'}
+            </ThemedText>
+          </View>
+        </View>
 
-        <View style={[styles.simVerdict, { backgroundColor: healthy ? R.greenSoft : R.redSoft }]}>
-          <ThemedText type="smallBold" themeColor={healthy ? 'textSuccess' : 'textError'}>
-            {healthy
-              ? '✓ Viable at these settings — positive net cash flow'
-              : '✗ Stress point — net cash flow turns negative'}
+        <SimSlider label="Selling price / unit" value={price} min={5} max={500} step={5} onChange={setPrice} prefix="₹" />
+        <SimSlider label="Cost / unit" value={cost} min={1} max={300} step={5} onChange={setCost} prefix="₹" />
+        <SimSlider label="Units sold / month" value={sales} min={10} max={5000} step={25} onChange={setSales} />
+        <SimSlider label="Monthly fixed costs" value={fixed} min={0} max={50000} step={500} onChange={setFixed} prefix="₹" />
+        <SimSlider label="Own margin capital" value={margin} min={0} max={500000} step={5000} onChange={setMargin} prefix="₹" />
+
+        <View style={[styles.simVerdict, { backgroundColor: isSurplusPositive ? R.greenSoft : R.redSoft }]}>
+          <ThemedText type="smallBold" themeColor={isSurplusPositive ? 'textSuccess' : 'textError'}>
+            {isSurplusPositive
+              ? (dscr != null && dscr >= 1.25 ? '✓ Structurally viable & meets DSCR threshold' : '✓ Positive operating surplus')
+              : '✗ Operating loss at these settings'}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            Net margin {Math.round(sim.margin * 100)}% · Break-even{' '}
-            {sim.revenue >= sim.breakEven ? 'achieved' : `needs ${formatINR(sim.breakEven - sim.revenue)} more`}
+            Readiness: {simSnapshot.overallReadiness} · Break-even revenue {breakEvenRev ? formatINR(breakEvenRev) : 'N/A'}
           </ThemedText>
         </View>
       </Card>
@@ -940,7 +827,7 @@ function SimSlider({
   max,
   step,
   onChange,
-  prefix,
+  prefix = '',
 }: {
   label: string;
   value: number;
@@ -950,72 +837,80 @@ function SimSlider({
   onChange: (v: number) => void;
   prefix?: string;
 }) {
-  const theme = useTheme();
   return (
-    <View style={styles.simSliderRow}>
-      <View style={styles.simSliderHeader}>
+    <View style={styles.simRow}>
+      <View style={styles.simLabelRow}>
         <ThemedText type="small" themeColor="textSecondary">
           {label}
         </ThemedText>
         <ThemedText type="smallBold" themeColor="text">
-          {prefix ?? ''}{value.toLocaleString('en-IN')}
+          {prefix}
+          {value.toLocaleString('en-IN')}
         </ThemedText>
       </View>
       <Slider
-        value={value}
         minimumValue={min}
         maximumValue={max}
         step={step}
+        value={value}
         onValueChange={onChange}
-        minimumTrackTintColor={R.green}
-        maximumTrackTintColor={theme.backgroundSelected}
-        thumbTintColor={R.green}
-        style={{ width: '100%', height: 36 }}
+        minimumTrackTintColor={R.amber}
+        maximumTrackTintColor="rgba(150,150,150,0.3)"
+        thumbTintColor={R.amber}
+        style={{ height: 28 }}
       />
     </View>
   );
 }
 
-/* ── 10. GO / CAUTION / NO-GO ── */
+/* ── 9. Recommendation Card (Section M: Canonical states & disclaimer) ── */
 function RecommendationCard({ riskData }: { riskData: RiskData }) {
-  const { decision, rationale, supportingPoints, actionItems } = riskData.recommendation;
-  const stylesByDecision = {
-    GO: { bg: R.greenSoft, border: R.green, text: R.green },
-    CAUTION: { bg: R.amberSoft, border: R.amber, text: R.amber },
-    'NO-GO': { bg: R.redSoft, border: R.red, text: R.red },
-  }[decision];
+  const { decision, decisionLabel, rationale, disclaimer, supportingPoints, actionItems } = riskData.recommendation;
+  
+  const isReady = decision === 'READY_FOR_FINANCE_REVIEW';
+  const isHighRisk = decision === 'HIGH_RISK';
+  const isOutOfScope = decision === 'OUT_OF_SCOPE';
+  const palette = isReady ? { bg: R.greenSoft, border: R.green, text: R.green }
+    : isHighRisk ? { bg: R.redSoft, border: R.red, text: R.red }
+    : { bg: R.amberSoft, border: R.amber, text: R.amber };
+
+  const displayTitle = decisionLabel || (
+    isReady ? 'Ready for finance review'
+    : isHighRisk ? 'Financial pressure detected'
+    : isOutOfScope ? 'Outside this scheme route'
+    : 'More information needed'
+  );
 
   return (
-    <Section title="Final Recommendation" subtitle="The verdict — GO, CAUTION or NO-GO">
-      <View style={[styles.recommendationCard, { backgroundColor: stylesByDecision.bg, borderColor: stylesByDecision.border }]}>
-        <Text style={[styles.recommendationBadge, { color: stylesByDecision.text, borderColor: stylesByDecision.border }]}>
-          {decision}
+    <Section title="Business Plan Readiness" subtitle="Deterministic policy evaluation">
+      <View style={[styles.recommendationCard, { backgroundColor: palette.bg, borderColor: palette.border }]}>
+        <Text style={[styles.recommendationBadge, { color: palette.text, borderColor: palette.border }]}>
+          {displayTitle}
         </Text>
         <ThemedText type="small" style={{ textAlign: 'center', marginTop: Spacing.two, color: '#3E2723' }}>
           {rationale}
+        </ThemedText>
+        <ThemedText type="small" style={{ textAlign: 'center', marginTop: 4, color: '#8D6E63', fontStyle: 'italic', fontSize: 11 }}>
+          {disclaimer || 'This is a business-plan readiness assessment, not loan approval.'}
         </ThemedText>
 
         {supportingPoints.length > 0 && (
           <View style={styles.recoColumn}>
             <ThemedText type="smallBold" style={{ color: '#3E2723' }}>
-              Why?
+              Findings
             </ThemedText>
-            {supportingPoints.map((p, i) => {
-              // Quick fix for long decimals in the backend strings
-              const formattedP = p.replace(/(\d+\.\d{3})\d+(%)/g, '$1$2');
-              return (
-                <ThemedText key={i} type="small" style={[styles.recoBullet, { color: '#5D4037' }]}>
-                  • {formattedP}
-                </ThemedText>
-              );
-            })}
+            {supportingPoints.map((p, i) => (
+              <ThemedText key={i} type="small" style={[styles.recoBullet, { color: '#5D4037' }]}>
+                • {p}
+              </ThemedText>
+            ))}
           </View>
         )}
 
         {actionItems.length > 0 && (
           <View style={styles.recoColumn}>
             <ThemedText type="smallBold" style={{ color: '#3E2723' }}>
-              What would make this safer?
+              Suggested Next Steps
             </ThemedText>
             {actionItems.map((a, i) => (
               <ThemedText key={i} type="small" style={[styles.recoBullet, { color: '#5D4037' }]}>
@@ -1029,47 +924,41 @@ function RecommendationCard({ riskData }: { riskData: RiskData }) {
   );
 }
 
-/* ── 11. Explainability / Evidence ── */
+/* ── 10. Explainability & Provenance (Section S) ── */
 function Explainability({ riskData }: { riskData: RiskData }) {
-  const nRisks = riskData.risks.length;
-  const nScenarios = riskData.scenarios.length;
+  const prov = riskData.provenance;
   return (
-    <Section title="Why does it say this?" subtitle="Evidence & traceability behind the verdict">
+    <Section title="Analysis Sources & Traceability" subtitle="Where this assessment comes from">
       <Card>
-        <ThemedText type="small" themeColor="textSecondary" style={{ marginBottom: Spacing.two }}>
-          This report is generated by a multi-agent risk pipeline that evaluates market, financial and operational
-          signals together. The key drivers:
+        <ThemedText type="smallBold" themeColor="text" style={{ marginBottom: 8 }}>
+          ANALYSIS SOURCES
         </ThemedText>
-        <View style={styles.evidenceGrid}>
-          <EvidenceRow label="Market analysis" value={`${riskData.marketRisk * 100}% market risk score`} />
-          <EvidenceRow label="Stress scenarios" value={`${nScenarios} scenarios tested (baseline → severe)`} />
-          <EvidenceRow label="Risk register" value={`${nRisks} risks quantified`} />
-          <EvidenceRow label="Viability" value={`${Math.round(riskData.businessViabilityScore * 100)}% confidence`} />
+
+        <View style={{ gap: 6, marginBottom: 12 }}>
+          <ThemedText type="small" themeColor="text">
+            ✓ User provided: {prov?.userProvided?.length ? prov.userProvided.join(', ') : 'Unit pricing, sales volume, fixed costs'}
+          </ThemedText>
+          <ThemedText type="small" themeColor="text">
+            ✓ AARTHIKA calculation: Revenue, Operating Surplus, Break-even, Candidate EMI, DSCR, Stress Scenarios
+          </ThemedText>
+          <ThemedText type="small" themeColor="text">
+            ✓ Government rule: {prov?.governmentRule || 'SIH Scheme Guidelines (Rate, Cap, Tenure)'}
+          </ThemedText>
+          <ThemedText type="small" style={{ color: '#D97706', fontWeight: '600' }}>
+            ⚠ Market data: No verified local market data available (requires on-ground validation)
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            ✓ AI explanation: Explanation only — no financial calculations
+          </ThemedText>
         </View>
-        <ThemedText type="small" themeColor="textSecondary" style={{ marginTop: Spacing.two, fontStyle: 'italic' }}>
-          Scores are normalized 0–100. A higher risk score means more caution is warranted before taking on debt.
+
+        <ThemedText type="small" themeColor="textSecondary" style={{ fontSize: 11 }}>
+          All financial values are strictly computed by deterministic policy formulas. AI is used solely to explain results.
         </ThemedText>
       </Card>
     </Section>
   );
 }
-
-function EvidenceRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.evidenceRow}>
-      <ThemedText type="small" themeColor="textSecondary" style={{ width: 120 }}>
-        {label}
-      </ThemedText>
-      <ThemedText type="smallBold" themeColor="text" style={{ flex: 1 }}>
-        {value}
-      </ThemedText>
-    </View>
-  );
-}
-
-/* ────────────────────────────────────────────────────────────
- *  Shared helpers
- * ──────────────────────────────────────────────────────────── */
 
 function severityRank(s: string): number {
   switch (s) {
@@ -1082,66 +971,38 @@ function severityRank(s: string): number {
 
 function severityThemeColor(s: string): ThemeColor {
   switch (s) {
-    case 'Critical': return 'textError';
+    case 'Critical':
     case 'High': return 'textError';
     case 'Medium': return 'textWarning';
     default: return 'textSuccess';
   }
 }
 
-function impactHex(impact: 'Low' | 'Medium' | 'High'): string {
-  switch (impact) {
-    case 'High': return R.red;
-    case 'Medium': return R.amber;
-    default: return R.green;
-  }
-}
-
-function impactSoft(impact: 'Low' | 'Medium' | 'High'): string {
-  switch (impact) {
-    case 'High': return R.redSoft;
-    case 'Medium': return R.amberSoft;
-    default: return R.greenSoft;
-  }
-}
-
-function categoryColor(category: string): string {
-  const colors = [R.green, R.amber, R.red, '#3F6653', '#8E4E14'];
-  let h = 0;
-  for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) >>> 0;
-  return colors[h % colors.length];
-}
-
-/** Compact INR label for chart axes: 1.2L, 45K, 800. */
-function compactINR(n: number): string {
-  const a = Math.abs(n);
-  if (a >= 100000) return `${(n / 100000).toFixed(a >= 1000000 ? 0 : 1)}L`;
-  if (a >= 1000) return `${(n / 1000).toFixed(a >= 10000 ? 0 : 1)}K`;
-  return `${Math.round(n)}`;
-}
-
-/** Build a 12-month cash-flow projection from the report's financials + base inputs. */
 function buildCashFlowSeries(riskData: RiskData): { month: string; revenue: number; expenses: number; net: number }[] {
   const f = riskData.financials;
-  const base = riskData.baseInputs;
+  const months = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11', 'M12'];
+  return months.map((month) => ({
+    month,
+    revenue: f.monthlyRevenue,
+    expenses: f.monthlyExpenses + f.loanEMI,
+    net: f.monthlyRevenue - (f.monthlyExpenses + f.loanEMI),
+  }));
+}
 
-  const months: { month: string; revenue: number; expenses: number; net: number }[] = [];
-  const now = new Date();
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  for (let i = 0; i < 12; i++) {
-    // Ramp revenue from 82% → 112% of current monthly revenue (typical micro-enterprise ramp).
-    const ramp = 0.82 + (i / 11) * 0.3;
-    const revenue = f.monthlyRevenue * ramp;
-
-    // Costs drift slightly upward; EMI constant.
-    const expenses = f.monthlyExpenses * (1 + i * 0.004);
-    const net = revenue - expenses - f.loanEMI;
-
-    const m = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    months.push({ month: MONTHS[m.getMonth()], revenue, expenses, net });
-  }
-  return months;
+function LegendDot({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
+  return (
+    <View style={styles.legendItem}>
+      <View
+        style={[
+          styles.legendDot,
+          { backgroundColor: dashed ? 'transparent' : color, borderColor: color, borderWidth: dashed ? 1 : 0 },
+        ]}
+      />
+      <ThemedText type="small" themeColor="textSecondary">
+        {label}
+      </ThemedText>
+    </View>
+  );
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -1150,66 +1011,63 @@ function buildCashFlowSeries(riskData: RiskData): { month: string; revenue: numb
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
-    padding: Spacing.three,
-    paddingBottom: Spacing.six,
-  },
-  section: {
-    marginBottom: Spacing.four,
-  },
-  sectionHeading: {
-    fontSize: 24,
-    lineHeight: 32,
-    marginBottom: Spacing.half,
-    color: '#3E2723', // Dark brown
-  },
-  sectionSub: {
-    marginBottom: Spacing.two,
-    color: '#5D4037', // Medium brown
-  },
-  card: {
-    borderRadius: 14,
-    padding: Spacing.three,
-    borderWidth: 1,
-  },
-  emptyState: {
-    padding: Spacing.five,
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-
-  /* Skeleton */
-  skeletonWrap: {
+    padding: Spacing.two,
+    paddingBottom: Spacing.four * 2,
     gap: Spacing.three,
+  },
+  skeletonWrap: {
+    padding: Spacing.two,
+    gap: Spacing.two,
   },
   skeletonBlock: {
     backgroundColor: 'rgba(150,150,150,0.18)',
-    borderRadius: 12,
+    width: '100%',
   },
-
-  /* Executive summary */
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.three,
-  },
-  summaryGaugeCard: {
+  emptyContainer: {
+    flex: 1,
+    padding: Spacing.two,
     alignItems: 'center',
-    flex: 1,
+    justifyContent: 'center',
   },
-  summaryMetrics: {
-    flex: 1,
+  emptyCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: Spacing.three,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 360,
+  },
+  section: {
+    gap: Spacing.one,
+  },
+  sectionHeading: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  sectionSub: {
+    marginBottom: Spacing.one,
+  },
+  card: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: Spacing.two,
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: 'rgba(150,150,150,0.15)',
+    marginVertical: 12,
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.two,
   },
-  metricChip: {
+  metricCell: {
+    width: '47%',
+    flexGrow: 1,
     borderRadius: 10,
     padding: Spacing.two,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
   },
-
-  /* Top risks */
   criticalRiskCard: {
     marginBottom: Spacing.two,
     borderLeftWidth: 3,
@@ -1239,8 +1097,62 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.two,
   },
-
-  /* SWOT */
+  riskCardList: {
+    gap: Spacing.two,
+  },
+  mobileRiskCard: {
+    borderRadius: 12,
+    padding: 12,
+  },
+  mobileRiskHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  mobileCategoryBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  severityPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  severityPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  mobileRiskStatsRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(150,150,150,0.06)',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+  },
+  mobileRiskStatItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statMiniLabel: {
+    fontSize: 10,
+    marginBottom: 2,
+  },
+  statMiniValue: {
+    fontSize: 12,
+  },
+  mobileMitigationBox: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: 'rgba(150,150,150,0.08)',
+    borderRadius: 8,
+    padding: 8,
+  },
+  mitigationShieldIcon: {
+    fontSize: 16,
+  },
   swotGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1266,19 +1178,6 @@ const styles = StyleSheet.create({
   swotMeta: {
     marginTop: 2,
   },
-  impactPill: {
-    alignSelf: 'flex-start',
-    borderRadius: 8,
-    paddingHorizontal: Spacing.one,
-    paddingVertical: 2,
-    marginTop: 2,
-  },
-  impactPillText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  /* Stress test */
   stressGrid: {
     gap: Spacing.two,
   },
@@ -1313,16 +1212,22 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 3,
   },
-
-  /* Charts */
   chartLegend: {
     flexDirection: 'row',
     gap: Spacing.three,
     marginTop: Spacing.two,
     justifyContent: 'center',
   },
-
-  /* Break-even */
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   beRow: {
     flexDirection: 'row',
     marginBottom: Spacing.two,
@@ -1349,173 +1254,54 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: Spacing.half,
   },
-  beLabelText: {
-    fontSize: 10,
-    color: '#60646C',
-  },
-  beStatsRow: {
+  simSummary: {
     flexDirection: 'row',
     gap: Spacing.two,
-    marginTop: Spacing.three,
+    marginBottom: Spacing.two,
   },
   statPill: {
     flex: 1,
     borderRadius: 10,
-    padding: Spacing.two,
-    backgroundColor: 'rgba(150,150,150,0.1)',
+    padding: Spacing.one,
+    backgroundColor: 'rgba(150,150,150,0.08)',
     alignItems: 'center',
   },
-
-  /* Contribution */
-  contributionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.two,
+  simRow: {
+    marginVertical: Spacing.half,
   },
-  contributionBar: {
-    flex: 1,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: 'rgba(150,150,150,0.15)',
-    marginHorizontal: Spacing.two,
-    overflow: 'hidden',
-  },
-  contributionFill: {
-    height: '100%',
-    borderRadius: 5,
-  },
-
-  /* Simulator */
-  simSummary: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    marginBottom: Spacing.three,
-  },
-  simSliderRow: {
-    marginBottom: Spacing.one,
-  },
-  simSliderHeader: {
+  simLabelRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    marginBottom: Spacing.half,
   },
   simVerdict: {
     marginTop: Spacing.two,
-    borderRadius: 10,
     padding: Spacing.two,
-    alignItems: 'center',
+    borderRadius: 10,
+    gap: 4,
   },
-
-  /* Recommendation */
   recommendationCard: {
-    borderRadius: 16,
     borderWidth: 2,
-    padding: Spacing.four,
+    borderRadius: 16,
+    padding: Spacing.three,
     alignItems: 'center',
   },
   recommendationBadge: {
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: 1,
-    borderWidth: 2,
+    fontSize: 16,
+    fontWeight: '800',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 12,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.half,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
   recoColumn: {
     width: '100%',
-    marginTop: Spacing.three,
+    marginTop: Spacing.two,
+    gap: Spacing.half,
   },
   recoBullet: {
-    marginTop: Spacing.half,
-  },
-
-  /* Evidence */
-  evidenceGrid: {
-    gap: Spacing.one,
-  },
-  evidenceRow: {
-    flexDirection: 'row',
-    gap: Spacing.one,
-  },
-  /* Mobile Risk Register styles */
-  riskCardList: {
-    gap: Spacing.two,
-  },
-  mobileRiskCard: {
-    padding: Spacing.two,
-    borderRadius: 14,
-    marginBottom: Spacing.one,
-  },
-  mobileRiskHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: Spacing.two,
-  },
-  mobileCategoryBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(150,150,150,0.12)',
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginTop: 4,
-  },
-  severityPill: {
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  severityPillText: {
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  mobileRiskStatsRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(150,150,150,0.06)',
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    marginBottom: Spacing.one,
-    justifyContent: 'space-between',
-  },
-  mobileRiskStatItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statMiniLabel: {
-    fontSize: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  statMiniValue: {
     fontSize: 13,
-    fontWeight: '700',
-  },
-  mobileMitigationBox: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(99,153,34,0.08)',
-    borderRadius: 8,
-    padding: 8,
-    marginTop: 4,
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  mitigationShieldIcon: {
-    fontSize: 14,
-    marginTop: 1,
+    lineHeight: 18,
   },
 });
-
-function LegendDot({ color, label }: { color: string; label: string }) {
-  const theme = useTheme();
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
-      <Text style={{ fontSize: 11, color: theme.textSecondary }}>{label}</Text>
-    </View>
-  );
-}

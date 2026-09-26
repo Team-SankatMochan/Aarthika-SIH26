@@ -122,7 +122,7 @@ export const ExploreSectorsView: React.FC<ExploreSectorsViewProps> = ({
           const setupCost = sector.presets.setupCost;
           const monthlyRevenue = sector.presets.salesPerMonth * sector.presets.pricePerUnit;
           const monthlyVariable = sector.presets.salesPerMonth * sector.presets.costPerUnit;
-          const monthlyProfit = monthlyRevenue - monthlyVariable - sector.presets.monthlyFixed - sector.presets.personalCost;
+          const monthlyProfit = monthlyRevenue - monthlyVariable - sector.presets.monthlyFixed;
 
           return (
             <View key={sector.id} style={styles.sectorCard}>
@@ -145,7 +145,7 @@ export const ExploreSectorsView: React.FC<ExploreSectorsViewProps> = ({
 
                 <View style={[styles.metricBadge, { backgroundColor: '#e2f4ea' }]}>
                   <Text style={[styles.metricLabel, { color: '#2d6a4f' }]}>
-                    {t('monthly_roi_tag') || 'Est. Profit'}
+                    {t('monthly_roi_tag') || 'Est. Surplus'}
                   </Text>
                   <Text style={[styles.metricValueSecondary, { color: monthlyProfit >= 0 ? '#2d6a4f' : '#ba1a1a' }]}>
                     {formatINR(monthlyProfit)}/mo
