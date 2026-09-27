@@ -32,6 +32,9 @@ function createSafeAdapter() {
             migrations,
             useWebWorker: false,
             useIncrementalIndexedDB: true,
+            onSetUpError: (error) => {
+                console.warn('LokiJS setup warning:', error);
+            },
         });
     }
 
@@ -51,11 +54,20 @@ function createSafeAdapter() {
         try {
             return new LokiJSAdapter({
                 schema,
+                migrations,
                 useWebWorker: false,
+                useIncrementalIndexedDB: false,
+                onSetUpError: (err) => {
+                    console.warn('LokiJS fallback setup warning:', err);
+                },
             });
         } catch (err) {
             console.warn('LokiJS fallback failed, using minimal memory adapter:', err);
-            return new LokiJSAdapter({ schema });
+            return new LokiJSAdapter({
+                schema,
+                useWebWorker: false,
+                useIncrementalIndexedDB: false,
+            });
         }
     }
 }
