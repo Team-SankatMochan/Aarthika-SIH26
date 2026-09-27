@@ -3,6 +3,32 @@ import { schemaMigrations, createTable, addColumns } from '@nozbe/watermelondb/S
 export default schemaMigrations({
     migrations: [
         {
+            toVersion: 5,
+            steps: [
+                addColumns({
+                    table: 'business_assumptions',
+                    columns: [
+                        { name: 'monthly_units_sold', type: 'number', isOptional: true },
+                        { name: 'unit_of_measure', type: 'string', isOptional: true },
+                        { name: 'selling_price_per_unit', type: 'number', isOptional: true },
+                        { name: 'variable_cost_per_unit', type: 'number', isOptional: true },
+                        { name: 'monthly_labour_cost', type: 'number', isOptional: true },
+                        { name: 'monthly_rent', type: 'number', isOptional: true },
+                        { name: 'monthly_transport_cost', type: 'number', isOptional: true },
+                        { name: 'monthly_other_fixed_cost', type: 'number', isOptional: true },
+                        { name: 'requested_loan_amount', type: 'number', isOptional: true },
+                        { name: 'working_capital_required', type: 'number', isOptional: true },
+                        { name: 'monthly_household_nonbusiness_income', type: 'number', isOptional: true },
+                        { name: 'monthly_household_essential_expenses', type: 'number', isOptional: true },
+                        { name: 'existing_monthly_household_debt_payments', type: 'number', isOptional: true },
+                        { name: 'monthly_fixed_cost', type: 'number', isOptional: true },
+                        { name: 'available_margin_capital', type: 'number', isOptional: true },
+                        { name: 'project_cost', type: 'number', isOptional: true },
+                    ],
+                }),
+            ],
+        },
+        {
             toVersion: 4,
             steps: [
                 addColumns({

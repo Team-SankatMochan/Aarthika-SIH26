@@ -154,12 +154,29 @@ export function createDynamicBusinessPlan(title: string): any {
     requestedLoanAmount: loan,
     householdIncome: 6000,
     existingEMI: 0,
-    presetSource: 'USER_PROVIDED',
+    presetSource: 'SUGGESTED_ESTIMATE',
     breakdown: presets.breakdown || [],
   };
 
   try {
     AsyncStorage.setItem('@business_plan', JSON.stringify(plan));
+    
+    // Also populate globalInputStore as unconfirmed
+    const t = Date.now();
+    const source = 'SUGGESTED_ESTIMATE';
+    
+    const storeObj = require('../engine/CanonicalInputStore').globalInputStore;
+    storeObj.set({ field: 'project_cost', value: plan.setupCost, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'monthly_fixed_cost', value: plan.monthlyFixed, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'unit_of_measure', value: plan.unitType, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'selling_price_per_unit', value: plan.pricePerUnit, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'variable_cost_per_unit', value: plan.costPerUnit, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'monthly_units_sold', value: plan.salesPerMonth, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'monthly_household_essential_expenses', value: plan.householdEssentialExpenses, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'available_margin_capital', value: plan.availableMarginCapital, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'requested_loan_amount', value: plan.requestedLoanAmount, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'monthly_household_nonbusiness_income', value: plan.householdIncome, source, confirmed: false, timestamp: t });
+    storeObj.set({ field: 'existing_monthly_household_debt_payments', value: plan.existingEMI, source, confirmed: false, timestamp: t });
   } catch (_e) {
     // ignore
   }
@@ -1433,11 +1450,12 @@ function MyPlanScreen() {
         try {
           const response = await api.business.createBusiness(businessData);
           if (response && response.id) {
-            setActiveBusinessId(response.id);
             try {
               await api.business.createAssumption(response.id, buildAssumptionsPayload(activeBusiness, response.id));
+              setActiveBusinessId(response.id);
             } catch (assumptionErr) {
               console.warn('Failed to persist assumptions:', (assumptionErr as Error).message);
+              setActiveBusinessId(null);
             }
           }
         } catch (e) {

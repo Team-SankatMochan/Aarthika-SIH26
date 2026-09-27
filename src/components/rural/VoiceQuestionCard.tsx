@@ -176,8 +176,17 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
 
   const confirmValue = () => {
     sttService.stopListening();
+    if (inputValue.trim() === '') {
+      setParseError('कृपया कोई संख्या या उत्तर दर्ज करें।');
+      return;
+    }
     if (isNumeric) {
-      onConfirm(Number(inputValue), 'USER_PROVIDED');
+      const num = Number(inputValue);
+      if (!isNaN(num) && num >= 0) {
+        onConfirm(num, 'USER_PROVIDED');
+      } else {
+        setParseError('कृपया वैध संख्या दर्ज करें।');
+      }
     } else {
       onConfirm(inputValue, 'USER_PROVIDED');
     }

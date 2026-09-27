@@ -108,18 +108,22 @@ const SCALE_MAP: Record<string, number> = {
 
 export interface NumberParseResult {
   success: boolean;
-  value: number;
+  value: number | null;
   formatted: string;
   rawText: string;
 }
 
 export function parseSpokenNumber(input: string): NumberParseResult {
   if (!input || typeof input !== 'string') {
-    return { success: false, value: 0, formatted: '', rawText: '' };
+    return { success: false, value: null, formatted: '', rawText: '' };
   }
 
   let text = input.trim();
   const rawText = text;
+
+  if (!text) {
+    return { success: false, value: null, formatted: '', rawText: input || '' };
+  }
 
   // 1. Normalize Indic digits (०-९, ০-৯, etc.) to ASCII 0-9
   text = text.replace(/[\u0966-\u096F\u09E6-\u09EF\u0C66-\u0C6F\u0A66-\u0A6F\u0CE6-\u0CEF\u0D66-\u0D6F]/g, (match) => {
@@ -201,7 +205,7 @@ export function parseSpokenNumber(input: string): NumberParseResult {
   }
 
   const finalTotal = currentTotal + currentSegment;
-  if (hasNumberToken && finalTotal > 0) {
+  if (hasNumberToken && finalTotal >= 0) {
     return {
       success: true,
       value: finalTotal,
@@ -211,5 +215,5 @@ export function parseSpokenNumber(input: string): NumberParseResult {
   }
 
   // 6. If not recognized, return failure
-  return { success: false, value: 0, formatted: '', rawText };
+  return { success: false, value: null, formatted: '', rawText };
 }

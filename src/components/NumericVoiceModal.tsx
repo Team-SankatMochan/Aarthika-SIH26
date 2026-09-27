@@ -123,7 +123,7 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
 
 
   const handleApply = () => {
-    if (parsedResult && parsedResult.success && parsedResult.value > 0) {
+    if (parsedResult && parsedResult.success && parsedResult.value >= 0) {
       onApplyValue(parsedResult.value);
       onClose();
     } else if (manualInput.trim()) {
@@ -241,9 +241,15 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
               value={manualInput}
               onChangeText={(txt) => {
                 setManualInput(txt);
-                const num = parseFloat(txt);
-                if (!isNaN(num)) {
-                  setParsedResult({ success: true, value: num, formatted: txt, rawText: txt });
+                if (txt.trim() === '') {
+                  setParsedResult(null);
+                } else {
+                  const num = parseFloat(txt);
+                  if (!isNaN(num) && num >= 0) {
+                    setParsedResult({ success: true, value: num, formatted: txt, rawText: txt });
+                  } else {
+                    setParsedResult(null);
+                  }
                 }
               }}
             />

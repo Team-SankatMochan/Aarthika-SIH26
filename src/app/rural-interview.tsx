@@ -16,6 +16,7 @@ import { StressSimulatorGrid } from '../components/rural/StressSimulatorGrid';
 import { ReadinessResult } from '../components/rural/ReadinessResult';
 import { calculateFinancialAssessment } from '../../engine/financeCalculator';
 import { getSIHSchemeTerms, SIHSchemeResult, AARTHIKA_CALCULATION_POLICY } from '../engine/SIHSchemeRules';
+import { hydrateCanonicalInputsFromWatermelon, persistCanonicalInputsToWatermelon } from '../services/canonicalPersistence';
 
 const engine = new InterviewEngine();
 
@@ -28,11 +29,25 @@ export default function RuralInterviewScreen() {
   const [currentScenario, setCurrentScenario] = useState<string | null>(null);
   const [schemeResult, setSchemeResult] = useState<SIHSchemeResult | null>(null);
   const [userProfile, setUserProfile] = useState<{ name?: string; location?: string; business?: string } | null>(null);
+  const [profileSource, setProfileSource] = useState<'DATABASE' | 'PROFILE' | null>(null);
 
   // Pre-populate user profile from database/AsyncStorage so Aarthika never re-asks for location or business!
   useEffect(() => {
     (async () => {
       try {
+        // 1. First attempt to hydrate confirmed values from local WatermelonDB schema v5
+        const dbHydrated = await hydrateCanonicalInputsFromWatermelon();
+        if (dbHydrated.hasConfirmedInputs) {
+          setProfileSource('DATABASE');
+          if (dbHydrated.businessCategory || dbHydrated.businessName) {
+            setUserProfile({
+              business: dbHydrated.businessCategory || dbHydrated.businessName,
+              location: dbHydrated.location || 'स्थानीय',
+            });
+          }
+        }
+
+        // 2. Load stored profile / user fallback
         const storedUser = await AsyncStorage.getItem('@user');
         const storedProfile = await AsyncStorage.getItem('@touchless_profile');
         const storedPlan = await AsyncStorage.getItem('@business_plan');
@@ -45,7 +60,14 @@ export default function RuralInterviewScreen() {
         const business = userObj?.occupation || userObj?.interestedSector || profObj?.occupation || planObj?.title || planObj?.sector;
 
         if (userName || location || business) {
-          setUserProfile({ name: userName, location, business });
+          setUserProfile((prev) => ({
+            name: userName || prev?.name,
+            location: location || prev?.location,
+            business: business || prev?.business,
+          }));
+          if (!dbHydrated.hasConfirmedInputs) {
+            setProfileSource('PROFILE');
+          }
         }
 
         // Pre-populate canonical store so InterviewEngine skips questions already in database!
@@ -70,39 +92,42 @@ export default function RuralInterviewScreen() {
         }
 
         if (planObj) {
-          if (planObj.availableMarginCapital != null && globalInputStore.get('available_margin_capital')?.value === undefined) {
+          const isConfirmed = planObj.presetSource === 'USER_PROVIDED' || planObj.presetSource === 'USER_CONFIRMED_ESTIMATE' || planObj.presetSource === 'ENTREPRENEUR';
+          const planSource = planObj.presetSource || 'SUGGESTED_ESTIMATE';
+
+          if (planObj.availableMarginCapital != null && planObj.availableMarginCapital !== '' && globalInputStore.get('available_margin_capital')?.value === undefined) {
             globalInputStore.set({
               field: 'available_margin_capital',
               value: Number(planObj.availableMarginCapital),
-              source: 'USER_PROVIDED',
-              confirmed: true,
+              source: planSource,
+              confirmed: isConfirmed,
               timestamp: Date.now(),
             });
           }
-          if (planObj.salesPerMonth != null && globalInputStore.get('monthly_units_sold')?.value === undefined) {
+          if (planObj.salesPerMonth != null && planObj.salesPerMonth !== '' && globalInputStore.get('monthly_units_sold')?.value === undefined) {
             globalInputStore.set({
               field: 'monthly_units_sold',
               value: Number(planObj.salesPerMonth),
-              source: 'USER_PROVIDED',
-              confirmed: true,
+              source: planSource,
+              confirmed: isConfirmed,
               timestamp: Date.now(),
             });
           }
-          if (planObj.pricePerUnit != null && globalInputStore.get('selling_price_per_unit')?.value === undefined) {
+          if (planObj.pricePerUnit != null && planObj.pricePerUnit !== '' && globalInputStore.get('selling_price_per_unit')?.value === undefined) {
             globalInputStore.set({
               field: 'selling_price_per_unit',
               value: Number(planObj.pricePerUnit),
-              source: 'USER_PROVIDED',
-              confirmed: true,
+              source: planSource,
+              confirmed: isConfirmed,
               timestamp: Date.now(),
             });
           }
-          if (planObj.costPerUnit != null && globalInputStore.get('variable_cost_per_unit')?.value === undefined) {
+          if (planObj.costPerUnit != null && planObj.costPerUnit !== '' && globalInputStore.get('variable_cost_per_unit')?.value === undefined) {
             globalInputStore.set({
               field: 'variable_cost_per_unit',
               value: Number(planObj.costPerUnit),
-              source: 'USER_PROVIDED',
-              confirmed: true,
+              source: planSource,
+              confirmed: isConfirmed,
               timestamp: Date.now(),
             });
           }
@@ -127,6 +152,13 @@ export default function RuralInterviewScreen() {
       timestamp: Date.now()
     });
 
+    // Asynchronously persist to WatermelonDB
+    persistCanonicalInputsToWatermelon({
+      inputs: globalInputStore.getConfirmedValues(),
+      source: provenance as ProvenanceSource,
+      confirmed: true,
+    }).catch((err) => console.warn('WatermelonDB persist error on confirm:', err));
+
     if (currentQuestion!.canonical_field === 'available_margin_capital') {
       setShowStructuring(true);
     }
@@ -136,7 +168,7 @@ export default function RuralInterviewScreen() {
     const margin = Number(inputs.available_margin_capital) || 0;
     const scheme = getSIHSchemeTerms(margin);
     setSchemeResult(scheme);
-    
+
     if (scheme.isOutOfScope) {
       setAssessmentResult({ isOutOfScope: true });
       return;
@@ -164,7 +196,7 @@ export default function RuralInterviewScreen() {
       if (stressScenario === 'RAW_MATERIAL_UP_20') val *= 1.20;
       engineInputs.variable_cost_per_unit = val;
     }
-    
+
     // Fixed costs
     if (inputs.monthly_rent !== undefined && inputs.monthly_rent !== null) engineInputs.monthly_rent = Number(inputs.monthly_rent);
     if (inputs.monthly_labour_cost !== undefined && inputs.monthly_labour_cost !== null) engineInputs.monthly_labour_cost = Number(inputs.monthly_labour_cost);
@@ -189,6 +221,13 @@ export default function RuralInterviewScreen() {
     } else {
       setCurrentScenario(stressScenario);
     }
+
+    // Persist finalized canonical inputs to WatermelonDB schema v5
+    persistCanonicalInputsToWatermelon({
+      inputs: globalInputStore.getConfirmedValues(),
+      source: 'USER_PROVIDED',
+      confirmed: true,
+    }).catch((err) => console.warn('WatermelonDB persist error on calculation:', err));
   };
 
   const handleStressTrigger = (scenario: string | null) => {
@@ -222,8 +261,10 @@ export default function RuralInterviewScreen() {
                   )}
                 </View>
               </View>
-              <View style={styles.verifiedTag}>
-                <Text style={styles.verifiedTagText}>✓ डेटाबेस से सत्यापित</Text>
+              <View style={[styles.verifiedTag, profileSource !== 'DATABASE' && { backgroundColor: '#e1f5fe' }]}>
+                <Text style={[styles.verifiedTagText, profileSource !== 'DATABASE' && { color: '#0277bd' }]}>
+                  {profileSource === 'DATABASE' ? '✓ स्थानीय डेटाबेस' : '📋 स्थानीय प्रोफ़ाइल'}
+                </Text>
               </View>
             </View>
           </View>

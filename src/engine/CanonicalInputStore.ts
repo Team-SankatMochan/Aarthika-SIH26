@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export type ProvenanceSource = 'USER_PROVIDED' | 'USER_CONFIRMED_ESTIMATE' | 'AARTHIKA_CALCULATION' | 'GOVERNMENT_RULE' | 'MARKET_DATA' | 'AI_EXPLANATION' | 'DEMO_DATA';
+export type ProvenanceSource = 'USER_PROVIDED' | 'USER_CONFIRMED_ESTIMATE' | 'AARTHIKA_CALCULATION' | 'GOVERNMENT_RULE' | 'MARKET_DATA' | 'AI_EXPLANATION' | 'DEMO_DATA' | 'SUGGESTED_ESTIMATE';
 
 export interface CanonicalInput {
   field: string;

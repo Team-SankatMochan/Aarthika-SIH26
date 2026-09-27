@@ -25,6 +25,8 @@ export const TrustBadge: React.FC<TrustBadgeProps> = ({ source, size = 'small' }
       icon = '📊'; label = 'बाजार डेटा'; bgColor = '#f3e5f5'; break;
     case 'AI_EXPLANATION':
       icon = '🤖'; label = 'AI Explanation'; bgColor = '#e0f7fa'; break;
+    case 'SUGGESTED_ESTIMATE':
+      icon = '💡'; label = 'सुझाया गया अनुमान'; bgColor = '#fff9c4'; break;
     case 'DEMO_DATA':
       icon = '⚠️'; label = 'DEMO DATA'; bgColor = '#ffebee'; break;
   }

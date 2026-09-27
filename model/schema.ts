@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export default appSchema({
-    version: 4,
+    version: 5,
     tables: [
         // ─── Core Entities ─────────────────────────────────────────
 
@@ -90,6 +90,22 @@ export default appSchema({
                 { name: 'working_capital', type: 'number' },
                 { name: 'proposed_loan_amount', type: 'number' },
                 { name: 'other_operating_cost', type: 'number' },
+                { name: 'monthly_units_sold', type: 'number', isOptional: true },
+                { name: 'unit_of_measure', type: 'string', isOptional: true },
+                { name: 'selling_price_per_unit', type: 'number', isOptional: true },
+                { name: 'variable_cost_per_unit', type: 'number', isOptional: true },
+                { name: 'monthly_labour_cost', type: 'number', isOptional: true },
+                { name: 'monthly_rent', type: 'number', isOptional: true },
+                { name: 'monthly_transport_cost', type: 'number', isOptional: true },
+                { name: 'monthly_other_fixed_cost', type: 'number', isOptional: true },
+                { name: 'requested_loan_amount', type: 'number', isOptional: true },
+                { name: 'working_capital_required', type: 'number', isOptional: true },
+                { name: 'monthly_household_nonbusiness_income', type: 'number', isOptional: true },
+                { name: 'monthly_household_essential_expenses', type: 'number', isOptional: true },
+                { name: 'existing_monthly_household_debt_payments', type: 'number', isOptional: true },
+                { name: 'monthly_fixed_cost', type: 'number', isOptional: true },
+                { name: 'available_margin_capital', type: 'number', isOptional: true },
+                { name: 'project_cost', type: 'number', isOptional: true },
                 { name: 'assumption_source', type: 'string' },
                 { name: 'confidence', type: 'number', isOptional: true },
                 { name: 'created_at', type: 'number' },

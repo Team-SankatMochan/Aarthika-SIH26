@@ -155,10 +155,12 @@ class WebSpeechProvider implements SpeechInputProvider {
           }
         }
 
-        const currentText = finalTranscript || interimTranscript;
-        if (currentText) {
-          this.lastTranscript = currentText.trim();
-          options.onResult(this.lastTranscript, !!finalTranscript);
+        if (finalTranscript) {
+          this.lastTranscript = '';
+          options.onResult(finalTranscript.trim(), true);
+        } else if (interimTranscript) {
+          this.lastTranscript = interimTranscript.trim();
+          options.onResult(this.lastTranscript, false);
         }
       };
 
@@ -223,6 +225,7 @@ class NativeSpeechProvider implements SpeechInputProvider {
   private listeners: any[] = [];
   private lastTranscript: string = '';
   private initializedListeners: boolean = false;
+  private hasDeliveredFinal: boolean = false;
 
   constructor() {
     if (isNativeSpeechModuleAvailable()) {
@@ -244,8 +247,19 @@ class NativeSpeechProvider implements SpeechInputProvider {
         mod.addListener('result', (event: any) => {
           const text = event.results?.[0]?.transcript || '';
           if (text) {
-            this.lastTranscript = text.trim();
-            this.currentOptions?.onResult(this.lastTranscript, !!event.isFinal);
+            const trimmed = text.trim();
+            if (event.isFinal) {
+              if (!this.hasDeliveredFinal) {
+                this.hasDeliveredFinal = true;
+                this.lastTranscript = '';
+                this.currentOptions?.onResult(trimmed, true);
+              }
+            } else {
+              if (!this.hasDeliveredFinal) {
+                this.lastTranscript = trimmed;
+                this.currentOptions?.onResult(trimmed, false);
+              }
+            }
           }
         }),
         mod.addListener('error', (event: any) => {
@@ -263,7 +277,8 @@ class NativeSpeechProvider implements SpeechInputProvider {
         }),
         mod.addListener('end', () => {
           this.isListening = false;
-          if (this.lastTranscript && this.currentOptions) {
+          if (this.lastTranscript && this.currentOptions && !this.hasDeliveredFinal) {
+            this.hasDeliveredFinal = true;
             const finalCandidate = this.lastTranscript;
             this.lastTranscript = '';
             this.currentOptions.onResult(finalCandidate, true);
@@ -297,6 +312,7 @@ class NativeSpeechProvider implements SpeechInputProvider {
     
     this.currentOptions = options;
     this.lastTranscript = '';
+    this.hasDeliveredFinal = false;
     this.setupListeners();
 
     const mod = getExpoSpeechRecognitionModule();
@@ -308,12 +324,15 @@ class NativeSpeechProvider implements SpeechInputProvider {
     try {
       const perms = await mod.requestPermissionsAsync?.();
       if (perms && !perms.granted) {
-        console.warn('[STT] Mic permission not granted, delegating to intelligent voice simulation');
-        const fallback = new IntelligentVoiceSimulationProvider();
-        fallback.startListening(options);
+        this.isListening = false;
+        options.onError?.(
+          options.lang === 'hi'
+            ? 'माइक्रोफ़ोन की अनुमति नहीं मिली। कृपया सेटिंग्स में अनुमति दें या नीचे लिखें।'
+            : 'Microphone permission denied. Please allow microphone in settings or type below.'
+        );
         return;
       }
-      
+
       const bcp47Lang = STT_LANG_MAP[options.lang || 'hi'] || 'hi-IN';
       mod.start({
         lang: bcp47Lang,
@@ -321,9 +340,13 @@ class NativeSpeechProvider implements SpeechInputProvider {
         continuous: options.continuous ?? false,
       });
     } catch (e: any) {
-      console.warn('[STT] Native speech recognition failed, delegating to intelligent voice simulation:', e);
-      const fallback = new IntelligentVoiceSimulationProvider();
-      fallback.startListening(options);
+      this.isListening = false;
+      console.warn('[STT] Native speech recognition failed:', e);
+      options.onError?.(
+        options.lang === 'hi'
+          ? 'वॉइस रिकग्निशन शुरू करने में समस्या आई। कृपया नीचे लिखकर जवाब दें।'
+          : 'Failed to start voice recognition. Please type below.'
+      );
     }
   }
 
@@ -346,7 +369,6 @@ class IntelligentVoiceSimulationProvider implements SpeechInputProvider {
   private isListening: boolean = false;
   private currentOptions: STTOptions | null = null;
   private timer: any = null;
-  private interimTimer: any = null;
   private customResponse: string | null = null;
 
   public isSupported(): boolean {
@@ -363,7 +385,7 @@ class IntelligentVoiceSimulationProvider implements SpeechInputProvider {
     this.currentOptions = options;
     options.onStart?.();
 
-    if (this.customResponse) {
+    if (this.customResponse !== null) {
       const resp = this.customResponse;
       this.customResponse = null;
       this.timer = setTimeout(() => {
@@ -371,15 +393,18 @@ class IntelligentVoiceSimulationProvider implements SpeechInputProvider {
         this.isListening = false;
         options.onResult(resp, true);
         options.onEnd?.();
-      }, 500);
+      }, 300);
+    } else {
+      // If no mock response set, notify that simulation is not active and prompt typing
+      options.onError?.('Speech recognition is not supported on this platform. Please type below.');
+      this.isListening = false;
+      options.onEnd?.();
     }
   }
 
   public stopListening() {
     clearTimeout(this.timer);
-    clearTimeout(this.interimTimer);
     this.timer = null;
-    this.interimTimer = null;
     if (this.isListening) {
       this.isListening = false;
       this.currentOptions?.onEnd?.();
@@ -421,16 +446,33 @@ class SpeechToTextService {
       }
     }
 
-    this.activeProvider = this.simulationProvider;
-    return this.simulationProvider;
+    return {
+      isSupported: () => false,
+      startListening: (options: STTOptions) => {
+        options.onError?.(
+          options.lang === 'hi'
+            ? 'वॉइस रिकग्निशन इस डिवाइस/ब्राउज़र पर उपलब्ध नहीं है। कृपया नीचे लिखकर जवाब दें।'
+            : 'Voice recognition is not available on this device/browser. Please type your input below.'
+        );
+      },
+      stopListening: () => {},
+      getActiveState: () => false,
+    };
   }
 
   public isSupported(): boolean {
-    return true; // Always supported across all devices, runtimes, and platforms!
+    if (Platform.OS === 'web') {
+      return new WebSpeechProvider().isSupported();
+    }
+    if (isNativeSpeechModuleAvailable()) {
+      return new NativeSpeechProvider().isSupported();
+    }
+    return new WebSpeechProvider().isSupported();
   }
 
   public setNextResponse(text: string) {
     this.simulationProvider.setNextResponse(text);
+    this.activeProvider = this.simulationProvider;
   }
 
   public startListening(options: STTOptions) {
