@@ -1206,3 +1206,38 @@ export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<str
     analyticsSnapshot: snapshot,
   };
 }
+
+/**
+ * Shared helper: map in-memory activeBusiness plan to backend canonical assumption schema.
+ * Preserves assumption_source provenance:
+ * - USER_CONFIRMED_ESTIMATE if confirmed by user
+ * - PRESET_UNCONFIRMED if unconfirmed preset
+ * - ENTREPRENEUR if custom / user entered
+ */
+export function buildAssumptionsPayload(biz: any, businessId: string): Record<string, unknown> {
+  let assumptionSource = 'ENTREPRENEUR';
+  if (biz?.presetSource === 'USER_CONFIRMED_ESTIMATE') {
+    assumptionSource = 'USER_CONFIRMED_ESTIMATE';
+  } else if (biz?.presetSource === 'SUGGESTED_ESTIMATE' || biz?.presetSource === 'PRESET_UNCONFIRMED' || biz?.presetSource === 'PRESET') {
+    assumptionSource = 'PRESET_UNCONFIRMED';
+  } else if (biz?.presetSource === 'ENTREPRENEUR' || biz?.presetSource === 'USER_PROVIDED') {
+    assumptionSource = 'ENTREPRENEUR';
+  }
+
+  return {
+    business_id: businessId,
+    monthly_units_sold: biz?.salesPerMonth ?? null,
+    unit_of_measure: biz?.unitType || 'unit',
+    selling_price_per_unit: biz?.pricePerUnit ?? null,
+    variable_cost_per_unit: biz?.costPerUnit ?? null,
+    monthly_fixed_cost: biz?.monthlyFixed ?? null,
+    available_margin_capital: biz?.availableMarginCapital ?? null,
+    project_cost: biz?.setupCost ?? null,
+    requested_loan_amount: biz?.requestedLoanAmount ?? null,
+    monthly_household_nonbusiness_income: biz?.householdIncome ?? null,
+    monthly_household_essential_expenses: biz?.householdEssentialExpenses ?? biz?.personalCost ?? null,
+    existing_monthly_household_debt_payments: biz?.existingEMI ?? null,
+    assumption_source: assumptionSource,
+  };
+}
+

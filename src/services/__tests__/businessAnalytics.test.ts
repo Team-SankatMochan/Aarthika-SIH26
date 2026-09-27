@@ -12,6 +12,7 @@ import {
   createBlankCustomBusiness,
   editableValue,
   computeInputHash,
+  buildAssumptionsPayload,
   type BusinessPlanInputs,
 } from '../businessAnalytics';
 import { SECTOR_CATALOG } from '../../constants/sectors';
@@ -630,5 +631,32 @@ describe('Aarthika Business Analytics Consolidation Suite', () => {
     };
     const snapNoPrice = generateAnalyticsSnapshot(missingPrice);
     expect(snapNoPrice.stressResults).toEqual([]);
+  });
+
+  // 28. Assumption provenance preservation
+  test('Test 28: buildAssumptionsPayload preserves USER_CONFIRMED_ESTIMATE, PRESET_UNCONFIRMED, and ENTREPRENEUR', () => {
+    const confirmedBiz = {
+      salesPerMonth: 600,
+      pricePerUnit: 40,
+      costPerUnit: 18,
+      monthlyFixed: 4000,
+      presetSource: 'USER_CONFIRMED_ESTIMATE',
+    };
+    const payloadConfirmed = buildAssumptionsPayload(confirmedBiz, 'biz_conf');
+    expect(payloadConfirmed.assumption_source).toBe('USER_CONFIRMED_ESTIMATE');
+
+    const presetBiz = {
+      salesPerMonth: 600,
+      presetSource: 'SUGGESTED_ESTIMATE',
+    };
+    const payloadPreset = buildAssumptionsPayload(presetBiz, 'biz_pre');
+    expect(payloadPreset.assumption_source).toBe('PRESET_UNCONFIRMED');
+
+    const customBiz = {
+      salesPerMonth: 600,
+      presetSource: 'ENTREPRENEUR',
+    };
+    const payloadCustom = buildAssumptionsPayload(customBiz, 'biz_cust');
+    expect(payloadCustom.assumption_source).toBe('ENTREPRENEUR');
   });
 });

@@ -364,6 +364,7 @@ async def generate_business_report(
         "government_rule": scheme.get("scheme_name") if scheme and not scheme.get("is_out_of_scope") else "NONE",
         "market_data_status": market_data_status,
         "location_source": location_source,
+        "assumption_source": latest_assumption.assumption_source if latest_assumption else "ENTREPRENEUR",
         "ai_explanation_only": True,
     }
 
@@ -374,7 +375,7 @@ async def generate_business_report(
             business_id=business.id,
             business_category=business.business_category,
             location=location_str,
-            capital=available_margin or 0.0,
+            capital=available_margin,
             deterministic_snapshot=deterministic_snapshot,
             market_data_status=market_data_status,
             evidence_count=evidence_count,

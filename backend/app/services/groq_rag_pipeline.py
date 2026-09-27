@@ -36,7 +36,7 @@ class AgentState(TypedDict):
     business_id: str
     business_category: str
     location: str
-    capital: float
+    capital: Optional[float]
     deterministic_snapshot: Dict[str, Any]
     market_data_status: str
     evidence_count: int
@@ -69,11 +69,19 @@ class GroqRAGPipeline:
         market_status = state.get("market_data_status", "NO_VERIFIED_DATA")
         evidence_count = state.get("evidence_count", 0)
 
+        cap = state.get("capital")
+        if cap is None:
+            capital_display = "Not provided"
+        elif cap == 0:
+            capital_display = "₹0"
+        else:
+            capital_display = f"₹{int(cap)}" if isinstance(cap, (int, float)) and float(cap).is_integer() else f"₹{cap}"
+
         retrieved_context = f"""
 [BUSINESS PROFILE]
 - Business Category: {state['business_category']}
 - Location: {state['location']}
-- Margin Capital: ₹{state['capital']}
+- Margin Capital: {capital_display}
 
 [DETERMINISTIC FINANCIAL SNAPSHOT]
 - Monthly Revenue: {snap.get('monthly_revenue', 'Missing')}
@@ -117,11 +125,19 @@ CRITICAL RULES:
 CRITICAL REQUIREMENT:
 You must respond with ONLY a valid, minified JSON object matching the schema. Absolutely NO markdown formatting, NO backticks (```json), NO conversational text, and NO preamble."""
 
+        cap = state.get("capital")
+        if cap is None:
+            capital_display = "Not provided"
+        elif cap == 0:
+            capital_display = "₹0"
+        else:
+            capital_display = f"₹{int(cap)}" if isinstance(cap, (int, float)) and float(cap).is_integer() else f"₹{cap}"
+
         human_prompt = """Explain the deterministic assessment for this business:
 
 Business Category: {business_category}
 Location: {location}
-Available Capital: ₹{capital}
+Available Capital: {capital}
 
 Context & Deterministic Assessment:
 {retrieved_context}
@@ -130,7 +146,7 @@ Context & Deterministic Assessment:
         inputs = {
             "business_category": state["business_category"],
             "location": state["location"],
-            "capital": state["capital"],
+            "capital": capital_display,
             "retrieved_context": state["retrieved_context"]
         }
 
@@ -195,7 +211,7 @@ Context & Deterministic Assessment:
         business_id: str,
         business_category: str,
         location: str,
-        capital: float,
+        capital: Optional[float] = None,
         deterministic_snapshot: Dict[str, Any] | None = None,
         market_data_status: str = "NO_VERIFIED_DATA",
         evidence_count: int = 0,

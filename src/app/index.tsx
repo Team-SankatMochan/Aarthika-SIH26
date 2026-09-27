@@ -57,7 +57,16 @@ _tGlobal.AARTHIKA_TRANSLATIONS = AARTHIKA_TRANSLATIONS;
 
 // Shared helper: map in-memory activeBusiness plan to backend canonical schema (Section H).
 // Uses the backend's canonical fields — does NOT fabricate arbitrary splits.
-function buildAssumptionsPayload(biz: any, businessId: string): Record<string, unknown> {
+export function buildAssumptionsPayload(biz: any, businessId: string): Record<string, unknown> {
+  let assumptionSource = 'ENTREPRENEUR';
+  if (biz?.presetSource === 'USER_CONFIRMED_ESTIMATE') {
+    assumptionSource = 'USER_CONFIRMED_ESTIMATE';
+  } else if (biz?.presetSource === 'SUGGESTED_ESTIMATE' || biz?.presetSource === 'PRESET_UNCONFIRMED' || biz?.presetSource === 'PRESET') {
+    assumptionSource = 'PRESET_UNCONFIRMED';
+  } else if (biz?.presetSource === 'ENTREPRENEUR' || biz?.presetSource === 'USER_PROVIDED') {
+    assumptionSource = 'ENTREPRENEUR';
+  }
+
   return {
     business_id: businessId,
     monthly_units_sold: biz?.salesPerMonth ?? null,
@@ -71,7 +80,7 @@ function buildAssumptionsPayload(biz: any, businessId: string): Record<string, u
     monthly_household_nonbusiness_income: biz?.householdIncome ?? null,
     monthly_household_essential_expenses: biz?.householdEssentialExpenses ?? biz?.personalCost ?? null,
     existing_monthly_household_debt_payments: biz?.existingEMI ?? null,
-    assumption_source: biz?.presetSource === 'SUGGESTED_ESTIMATE' ? 'PRESET_UNCONFIRMED' : 'ENTREPRENEUR',
+    assumption_source: assumptionSource,
   };
 }
 

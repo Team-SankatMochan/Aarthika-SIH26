@@ -523,3 +523,105 @@ def test_32_missing_core_economics_stress_tests_empty(client, db_session):
     assert snap["stress_results"] == []
 
 
+def test_33_missing_capital_does_not_produce_zero_in_ai_context(client, db_session):
+    """Test 33: Regression test: available_margin = None must not produce 'Available Capital: ₹0'."""
+    from unittest.mock import patch, AsyncMock
+    from app.services.groq_rag_pipeline import GroqRAGPipeline
+
+    # 1. Direct pipeline prompt verification: capital is None
+    dummy_state = {
+        "business_id": "biz_test_33_mock",
+        "business_category": "Dairy",
+        "location": "Pune",
+        "capital": None,
+        "deterministic_snapshot": {},
+        "market_data_status": "NO_VERIFIED_DATA",
+        "evidence_count": 0,
+    }
+    # Create instance without invoking real remote models
+    pipeline = GroqRAGPipeline.__new__(GroqRAGPipeline)
+    retrieved = pipeline._retrieve_context(dummy_state)
+    ctx_text = retrieved["retrieved_context"]
+    assert "Margin Capital: Not provided" in ctx_text
+    assert "Margin Capital: ₹0" not in ctx_text
+    assert "Available Capital: ₹0" not in ctx_text
+
+    # 2. Check capital == 0 explicitly supplied renders ₹0
+    dummy_state_zero = dict(dummy_state, capital=0.0)
+    retrieved_zero = pipeline._retrieve_context(dummy_state_zero)
+    assert "Margin Capital: ₹0" in retrieved_zero["retrieved_context"]
+
+    # 3. Route call: verify endpoint passes capital=None (not 0.0) to pipeline
+    user = User(id="user_test_33", name="Lakshmi", available_capital=None)
+    db_session.add(user)
+    db_session.commit()
+
+    biz = Business(id="biz_test_33", user_id=user.id, business_name="Lakshmi Dairy", business_category="Dairy")
+    db_session.add(biz)
+    db_session.commit()
+
+    a = BusinessAssumption(
+        business_id=biz.id,
+        monthly_units_sold=Decimal("500"),
+        selling_price_per_unit=Decimal("40"),
+        variable_cost_per_unit=Decimal("20"),
+        monthly_fixed_cost=Decimal("3000"),
+        available_margin_capital=None,
+    )
+    db_session.add(a)
+    db_session.commit()
+
+    with patch("app.api.routes.ai_reports.get_rag_pipeline") as mock_get_pipeline:
+        mock_instance = AsyncMock()
+        mock_instance.generate_report.return_value = {
+            "business_id": biz.id,
+            "final_recommendation": {
+                "summary": "Feasibility assessment complete.",
+                "deterministic_findings_explained": "DSCR is healthy.",
+                "caveats": [],
+                "questions_to_validate": [],
+                "suggested_next_steps": []
+            },
+            "metadata": {
+                "retrieved_context": "",
+                "agent_messages": []
+            }
+        }
+        mock_get_pipeline.return_value = mock_instance
+
+        resp = client.post("/ai/generate-report", json={"business_id": biz.id})
+        assert resp.status_code == 200
+
+        # Assert generate_report was called with capital=None, NEVER 0.0
+        call_kwargs = mock_instance.generate_report.call_args.kwargs
+        assert call_kwargs.get("capital") is None, f"Expected capital=None, got {call_kwargs.get('capital')}"
+
+
+def test_34_user_confirmed_estimate_provenance_preserved(client, db_session):
+    """Test 34: USER_CONFIRMED_ESTIMATE does not collapse into ENTREPRENEUR."""
+    user = User(id="user_test_34", name="Pooja", available_capital=Decimal("10000.00"))
+    db_session.add(user)
+    db_session.commit()
+
+    biz = Business(id="biz_test_34", user_id=user.id, business_name="Pooja Textiles", business_category="Textiles")
+    db_session.add(biz)
+    db_session.commit()
+
+    # Create assumption with USER_CONFIRMED_ESTIMATE
+    a = BusinessAssumption(
+        business_id=biz.id,
+        monthly_units_sold=Decimal("400"),
+        selling_price_per_unit=Decimal("100"),
+        variable_cost_per_unit=Decimal("50"),
+        monthly_fixed_cost=Decimal("5000"),
+        available_margin_capital=Decimal("10000"),
+        assumption_source="USER_CONFIRMED_ESTIMATE",
+    )
+    db_session.add(a)
+    db_session.commit()
+
+    report = client.post("/ai/generate-report", json={"business_id": biz.id}).json()
+    assert report["provenance"]["assumption_source"] == "USER_CONFIRMED_ESTIMATE"
+
+
+
