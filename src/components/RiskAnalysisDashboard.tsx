@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -61,6 +62,7 @@ export interface RiskData {
     monthlyExpenses: number | null;
     loanEMI: number | null;
     operatingSurplus?: number | null;
+    postEmiCashFlow?: number | null;
     netCashFlow: number | null;
     breakEvenRevenue: number | null;
     breakEvenUnits?: number | null;
@@ -72,8 +74,8 @@ export interface RiskData {
     label?: string;
     revenueChange: number;
     costChange: number;
-    monthlyRevenue: number;
-    monthlyExpenses: number;
+    monthlyRevenue: number | null;
+    monthlyExpenses: number | null;
     operatingSurplus?: number | null;
     loanEMI: number | null;
     postEmiCashFlow?: number | null;
@@ -329,12 +331,16 @@ function DeterministicMetricsSummary({ riskData }: { riskData: RiskData }) {
           />
           <MetricCell
             label="Household Readiness"
-            value={m.householdReadiness || 'Need more information'}
+            value={
+              m.householdReadiness === 'INSUFFICIENT_DATA' || m.householdReadiness === 'INCOMPLETE' || !m.householdReadiness
+                ? 'Need more information'
+                : m.householdReadiness
+            }
             tone={readinessColor(m.householdReadiness)}
           />
           <MetricCell
-            label="Overall Readiness"
-            value={m.overallReadiness || 'Need more information'}
+            label="Overall Assessment"
+            value={m.overallReadiness === 'INCOMPLETE' ? 'Incomplete' : (m.overallReadiness || 'Need more information')}
             tone={readinessColor(m.overallReadiness)}
           />
         </View>
@@ -558,10 +564,10 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
     <Section title="Financial Stress Test" subtitle="Deterministic sensitivity under demand shock and cost increase">
       <View style={styles.stressGrid}>
         {riskData.scenarios.map((s, i) => {
-          const surplus = s.operatingSurplus ?? (s.monthlyRevenue - s.monthlyExpenses);
-          const healthySurplus = surplus >= 0;
+          const surplus = s.operatingSurplus;
+          const healthySurplus = surplus != null && surplus >= 0;
           return (
-            <Card key={i} style={[styles.scenarioCard, { borderLeftColor: healthySurplus ? R.green : R.red, borderLeftWidth: 3 }]}>
+            <Card key={i} style={[styles.scenarioCard, { borderLeftColor: surplus != null ? (healthySurplus ? R.green : R.red) : R.amber, borderLeftWidth: 3 }]}>
               <View style={styles.scenarioHeader}>
                 <ThemedText type="smallBold" themeColor="text">
                   {s.label || s.name}
@@ -571,12 +577,12 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
                 </ThemedText>
               </View>
               <View style={styles.scenarioMetrics}>
-                <MetricPair label="Revenue" value={formatINR(s.monthlyRevenue)} />
-                <MetricPair label="Expenses" value={formatINR(s.monthlyExpenses)} />
+                <MetricPair label="Revenue" value={s.monthlyRevenue != null ? formatINR(s.monthlyRevenue) : 'Need more information'} />
+                <MetricPair label="Expenses" value={s.monthlyExpenses != null ? formatINR(s.monthlyExpenses) : 'Need more information'} />
                 <MetricPair
                   label="Operating Surplus (before EMI)"
-                  value={formatINR(surplus)}
-                  valueTone={healthySurplus ? 'textSuccess' : 'textError'}
+                  value={surplus != null ? formatINR(surplus) : 'Need more information'}
+                  valueTone={surplus != null ? (healthySurplus ? 'textSuccess' : 'textError') : 'textSecondary'}
                 />
                 <MetricPair
                   label="EMI"
@@ -597,7 +603,9 @@ function FinancialStressTest({ riskData }: { riskData: RiskData }) {
                   style={[
                     styles.scenarioBarFill,
                     {
-                      width: `${Math.min(Math.abs(surplus) / Math.max(Math.abs(riskData.financials.monthlyRevenue ?? 1), 1) * 100, 100)}%`,
+                      width: surplus != null
+                        ? `${Math.min(Math.abs(surplus) / Math.max(Math.abs(riskData.financials.monthlyRevenue ?? 1), 1) * 100, 100)}%`
+                        : '0%',
                       backgroundColor: healthySurplus ? R.green : R.red,
                     },
                   ]}
@@ -637,9 +645,9 @@ function CashFlowSection({ riskData }: { riskData: RiskData }) {
   const f = riskData.financials;
   const rev = f.monthlyRevenue;
   const exp = f.monthlyExpenses;
-  const surplus = f.operatingSurplus ?? (rev != null && exp != null ? rev - exp : null);
+  const surplus = f.operatingSurplus;
   const emi = f.loanEMI;
-  const cashAfterEmi = emi != null && surplus != null ? surplus - emi : null;
+  const cashAfterEmi = f.postEmiCashFlow;
 
   return (
     <Section title="Monthly Cash Flow Snapshot" subtitle="Deterministic view of monthly revenue, operating costs, and debt service">
@@ -804,7 +812,7 @@ function WhatIfSimulator({ riskData }: { riskData: RiskData }) {
       initialCost={base.costPerUnit}
       initialSales={base.salesPerMonth}
       initialFixed={base.monthlyFixed}
-      initialMargin={base.availableMarginCapital ?? 0}
+      initialMargin={base.availableMarginCapital}
     />
   );
 }
@@ -822,13 +830,14 @@ function WhatIfSimulatorActive({
   initialCost: number;
   initialSales: number;
   initialFixed: number;
-  initialMargin: number;
+  initialMargin?: number | null;
 }) {
   const [price, setPrice] = useState<number>(initialPrice);
   const [cost, setCost] = useState<number>(initialCost);
   const [sales, setSales] = useState<number>(initialSales);
   const [fixed, setFixed] = useState<number>(initialFixed);
-  const [margin, setMargin] = useState<number>(initialMargin);
+  const [marginEnabled, setMarginEnabled] = useState<boolean>(initialMargin !== null && initialMargin !== undefined);
+  const [margin, setMargin] = useState<number>(initialMargin ?? 0);
 
   const simSnapshot = useMemo(() => {
     const modifiedPlan: BusinessPlanInputs = {
@@ -837,10 +846,10 @@ function WhatIfSimulatorActive({
       variableCostPerUnit: cost,
       monthlyUnitsSold: sales,
       monthlyBusinessFixedCost: fixed,
-      availableMarginCapital: margin > 0 ? margin : null,
+      availableMarginCapital: marginEnabled ? margin : null,
     };
     return generateAnalyticsSnapshot(modifiedPlan);
-  }, [price, cost, sales, fixed, margin, riskData.analyticsSnapshot?.inputs]);
+  }, [price, cost, sales, fixed, margin, marginEnabled, riskData.analyticsSnapshot?.inputs]);
 
   // Strictly consume engine values — NO UI calculations / fallbacks!
   const revenue = simSnapshot.monthlyRevenue;
@@ -901,7 +910,38 @@ function WhatIfSimulatorActive({
         <SimSlider label="Cost / unit" value={cost} min={1} max={300} step={5} onChange={setCost} prefix="₹" />
         <SimSlider label="Units sold / month" value={sales} min={10} max={5000} step={25} onChange={setSales} />
         <SimSlider label="Monthly fixed costs" value={fixed} min={0} max={50000} step={500} onChange={setFixed} prefix="₹" />
-        <SimSlider label="Own margin capital" value={margin} min={0} max={500000} step={5000} onChange={setMargin} prefix="₹" />
+        {marginEnabled ? (
+          <SimSlider label="Own margin capital" value={margin} min={0} max={500000} step={5000} onChange={setMargin} prefix="₹" />
+        ) : (
+          <View style={[styles.simRow, { paddingVertical: 8, borderTopWidth: 1, borderTopColor: 'rgba(150,150,150,0.15)', marginTop: 8 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <ThemedText type="smallBold" themeColor="textSecondary">
+                  Financing not configured
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary" style={{ fontSize: 11 }}>
+                  Add margin capital to simulate scheme loans & EMI
+                </ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setMarginEnabled(true);
+                  setMargin(0);
+                }}
+                style={{
+                  backgroundColor: R.amber,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                }}
+              >
+                <ThemedText type="smallBold" style={{ color: '#000', fontSize: 12 }}>
+                  Add margin capital
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         <View style={[styles.simVerdict, { backgroundColor: isSurplusPositive ? R.greenSoft : R.redSoft }]}>
           <ThemedText type="smallBold" themeColor={isSurplusPositive ? 'textSuccess' : 'textError'}>
@@ -965,15 +1005,22 @@ function SimSlider({
 function RecommendationCard({ riskData }: { riskData: RiskData }) {
   const { decision, decisionLabel, rationale, disclaimer, supportingPoints, actionItems } = riskData.recommendation;
   
+  const isBusinessHighRiskWithIncompleteHousehold =
+    riskData.deterministicMetrics?.businessReadiness === 'HIGH_RISK' &&
+    (riskData.deterministicMetrics?.householdReadiness === 'INCOMPLETE' ||
+     riskData.deterministicMetrics?.householdReadiness === 'INSUFFICIENT_DATA' ||
+     !riskData.deterministicMetrics?.householdReadiness);
+
   const isReady = decision === 'READY_FOR_FINANCE_REVIEW';
-  const isHighRisk = decision === 'HIGH_RISK';
-  const isOutOfScope = decision === 'OUT_OF_SCOPE';
+  const isHighRisk = decision === 'HIGH_RISK' || isBusinessHighRiskWithIncompleteHousehold;
+  const isOutOfScope = decision === 'OUT_OF_SCOPE' || decisionLabel === 'Outside this scheme route';
   const palette = isReady ? { bg: R.greenSoft, border: R.green, text: R.green }
     : isHighRisk ? { bg: R.redSoft, border: R.red, text: R.red }
     : { bg: R.amberSoft, border: R.amber, text: R.amber };
 
   const displayTitle = decisionLabel || (
     isReady ? 'Ready for finance review'
+    : isBusinessHighRiskWithIncompleteHousehold ? 'Business financial pressure detected'
     : isHighRisk ? 'Financial pressure detected'
     : isOutOfScope ? 'Outside this scheme route'
     : 'More information needed'

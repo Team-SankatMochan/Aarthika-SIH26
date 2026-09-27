@@ -75,10 +75,10 @@ export type ReportStatus =
 export interface StressScenarioResult {
   name: string;
   label: string;
-  revenue: number;
-  variableCost: number;
-  fixedCost: number;
-  operatingSurplus: number;
+  revenue: number | null;
+  variableCost: number | null;
+  fixedCost: number | null;
+  operatingSurplus: number | null;
   emi: number | null;
   loanEMI: number | null;
   dscr: number | null;
@@ -90,8 +90,8 @@ export interface StressScenarioResult {
   revenueChange: number;
   costChange: number;
   netCashFlow: number | null;
-  monthlyRevenue: number;
-  monthlyExpenses: number;
+  monthlyRevenue: number | null;
+  monthlyExpenses: number | null;
 }
 
 export interface RiskFinding {
@@ -123,7 +123,7 @@ export interface AnalyticsSnapshot {
 
   // Section status breakdown (Section Z & Item 16)
   businessAnalysisStatus: 'COMPLETE' | 'STRUCTURALLY_UNVIABLE' | 'INSUFFICIENT_DATA';
-  financingAnalysisStatus: 'COMPLETE' | 'SCHEME_ROUTED' | 'INCOMPLETE';
+  financingAnalysisStatus: 'COMPLETE' | 'SCHEME_ROUTED' | 'INCOMPLETE' | 'OUT_OF_SCOPE';
   householdAnalysisStatus: 'COMPLETE' | 'INCOMPLETE' | 'INSUFFICIENT_DATA';
   marketAnalysisStatus: 'VERIFIED_DATA' | 'USER_PROVIDED_ONLY' | 'NO_VERIFIED_DATA';
 
@@ -328,24 +328,33 @@ export function normalizeCanonicalValue(v: any): string {
     return '';
   }
   if (typeof v === 'number') {
-    if (Number.isInteger(v)) {
+    if (Object.is(v, -0) || v === 0) {
+      return '0';
+    }
+    if (!Number.isFinite(v)) {
       return String(v);
     }
-    const s = String(v);
+    let s = v.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 });
     if (s.includes('.')) {
-      const stripped = s.replace(/\.?0+$/, '');
-      return stripped === '' ? '0' : stripped;
+      s = s.replace(/\.?0+$/, '');
+      return s === '' || s === '-0' ? '0' : s;
     }
-    return s;
+    return s === '-0' ? '0' : s;
   }
   if (typeof v === 'string') {
     const trimmed = v.trim();
-    if (trimmed !== '' && !isNaN(Number(trimmed)) && !trimmed.includes('e') && !trimmed.includes('E')) {
-      if (trimmed.includes('.')) {
-        const stripped = trimmed.replace(/\.?0+$/, '');
-        return stripped === '' ? '0' : stripped;
+    if (trimmed === '-0') return '0';
+    const num = Number(trimmed);
+    if (trimmed !== '' && !isNaN(num) && Number.isFinite(num)) {
+      if (Object.is(num, -0) || num === 0) {
+        return '0';
       }
-      return trimmed;
+      let s = num.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 });
+      if (s.includes('.')) {
+        s = s.replace(/\.?0+$/, '');
+        return s === '' || s === '-0' ? '0' : s;
+      }
+      return s === '-0' ? '0' : s;
     }
     return v;
   }
@@ -492,7 +501,9 @@ export function generateAnalyticsSnapshot(plan: BusinessPlanInputs): AnalyticsSn
     financeResult.business_affordability_status
   );
   const householdAffordabilityStatus = financeResult.household_affordability_status ?? 'INCOMPLETE';
-  const overallReadiness = financeResult.overall_readiness ?? 'INCOMPLETE';
+  const overallReadiness = scheme?.isOutOfScope
+    ? 'OUT_OF_SCOPE'
+    : (financeResult.overall_readiness ?? 'INCOMPLETE');
 
   const businessAnalysisAvailable = operatingSurplus !== null;
   const householdAnalysisAvailable =
@@ -517,9 +528,11 @@ export function generateAnalyticsSnapshot(plan: BusinessPlanInputs): AnalyticsSn
       : 'COMPLETE';
 
   const financingAnalysisStatus: AnalyticsSnapshot['financingAnalysisStatus'] =
-    candidateEmi !== null && businessDscr !== null
+    scheme?.isOutOfScope
+      ? 'OUT_OF_SCOPE'
+      : candidateEmi !== null && businessDscr !== null
       ? 'COMPLETE'
-      : scheme && !scheme.isOutOfScope
+      : scheme
       ? 'SCHEME_ROUTED'
       : 'INCOMPLETE';
 
@@ -653,17 +666,23 @@ function generateStressScenarios(
 ): StressScenarioResult[] {
   const scenarios: StressScenarioResult[] = [];
 
-  if (!isPresent(plan.monthlyUnitsSold) || !isPresent(plan.sellingPricePerUnit) || !isPresent(plan.variableCostPerUnit)) {
+  if (
+    !isPresent(plan.monthlyUnitsSold) ||
+    !isPresent(plan.sellingPricePerUnit) ||
+    !isPresent(plan.variableCostPerUnit) ||
+    !isPresent(plan.monthlyBusinessFixedCost)
+  ) {
     return scenarios;
   }
 
-  const baseRevenue = baseResult.monthly_revenue ?? 0;
-  const baseVarCost = baseResult.monthly_variable_cost ?? 0;
-  const baseFixed = baseResult.monthly_fixed_cost ?? 0;
-  const baseSurplus = baseResult.monthly_operating_surplus ?? 0;
+  const baseRevenue = baseResult.monthly_revenue ?? null;
+  const baseVarCost = baseResult.monthly_variable_cost ?? null;
+  const baseFixed = baseResult.monthly_fixed_cost ?? null;
+  const baseSurplus = baseResult.monthly_operating_surplus ?? null;
+  const baseExpenses = baseVarCost != null || baseFixed != null ? (baseVarCost ?? 0) + (baseFixed ?? 0) : null;
   const baseEmi = baseResult.candidate_emi ?? null;
   const baseLoanEmi = baseEmi;
-  const basePostEmiCash = baseEmi !== null ? baseSurplus - baseEmi : null;
+  const basePostEmiCash = baseEmi !== null && baseSurplus !== null ? baseSurplus - baseEmi : null;
 
   const baseDscr = baseResult.business_dscr ?? null;
   const baseBizStatus = deriveBusinessAffordabilityStatus(baseDscr, baseSurplus, baseResult.business_affordability_status);
@@ -688,7 +707,7 @@ function generateStressScenarios(
     costChange: 0,
     netCashFlow: basePostEmiCash,
     monthlyRevenue: baseRevenue,
-    monthlyExpenses: baseVarCost + baseFixed,
+    monthlyExpenses: baseExpenses,
   });
 
   // DEMAND_DROP_20: reduce monthly units by 20%
@@ -698,14 +717,15 @@ function generateStressScenarios(
   }
   try {
     const demandResult = calculateFinancialAssessment(demandDropInputs, AARTHIKA_CALCULATION_POLICY);
-    const rev = demandResult.monthly_revenue ?? 0;
-    const varC = demandResult.monthly_variable_cost ?? 0;
-    const fixed = demandResult.monthly_fixed_cost ?? 0;
-    const surplus = demandResult.monthly_operating_surplus ?? 0;
+    const rev = demandResult.monthly_revenue ?? null;
+    const varC = demandResult.monthly_variable_cost ?? null;
+    const fixed = demandResult.monthly_fixed_cost ?? null;
+    const surplus = demandResult.monthly_operating_surplus ?? null;
+    const expenses = varC != null || fixed != null ? (varC ?? 0) + (fixed ?? 0) : null;
     const emi = demandResult.candidate_emi !== undefined ? demandResult.candidate_emi : baseEmi;
     const loanEMI = emi ?? null;
-    const postEmiCash = emi != null ? surplus - emi : null;
-    const dscr = demandResult.business_dscr ?? (emi != null && emi > 0 ? surplus / emi : null);
+    const postEmiCash = emi != null && surplus != null ? surplus - emi : null;
+    const dscr = demandResult.business_dscr ?? (emi != null && emi > 0 && surplus != null ? surplus / emi : null);
     const bizStatus = deriveBusinessAffordabilityStatus(dscr, surplus, demandResult.business_affordability_status);
 
     scenarios.push({
@@ -727,7 +747,7 @@ function generateStressScenarios(
       costChange: 0,
       netCashFlow: postEmiCash,
       monthlyRevenue: rev,
-      monthlyExpenses: varC + fixed,
+      monthlyExpenses: expenses,
     });
   } catch (e) {
     console.warn('[BusinessAnalytics] DEMAND_DROP_20 stress failed:', e);
@@ -740,14 +760,15 @@ function generateStressScenarios(
   }
   try {
     const rawMatResult = calculateFinancialAssessment(rawMatInputs, AARTHIKA_CALCULATION_POLICY);
-    const rev = rawMatResult.monthly_revenue ?? 0;
-    const varC = rawMatResult.monthly_variable_cost ?? 0;
-    const fixed = rawMatResult.monthly_fixed_cost ?? 0;
-    const surplus = rawMatResult.monthly_operating_surplus ?? 0;
+    const rev = rawMatResult.monthly_revenue ?? null;
+    const varC = rawMatResult.monthly_variable_cost ?? null;
+    const fixed = rawMatResult.monthly_fixed_cost ?? null;
+    const surplus = rawMatResult.monthly_operating_surplus ?? null;
+    const expenses = varC != null || fixed != null ? (varC ?? 0) + (fixed ?? 0) : null;
     const emi = rawMatResult.candidate_emi !== undefined ? rawMatResult.candidate_emi : baseEmi;
     const loanEMI = emi ?? null;
-    const postEmiCash = emi != null ? surplus - emi : null;
-    const dscr = rawMatResult.business_dscr ?? (emi != null && emi > 0 ? surplus / emi : null);
+    const postEmiCash = emi != null && surplus != null ? surplus - emi : null;
+    const dscr = rawMatResult.business_dscr ?? (emi != null && emi > 0 && surplus != null ? surplus / emi : null);
     const bizStatus = deriveBusinessAffordabilityStatus(dscr, surplus, rawMatResult.business_affordability_status);
 
     scenarios.push({
@@ -769,7 +790,7 @@ function generateStressScenarios(
       costChange: 20,
       netCashFlow: postEmiCash,
       monthlyRevenue: rev,
-      monthlyExpenses: varC + fixed,
+      monthlyExpenses: expenses,
     });
   } catch (e) {
     console.warn('[BusinessAnalytics] RAW_MATERIAL_UP_20 stress failed:', e);
@@ -864,26 +885,26 @@ function generateDynamicRiskFindings(
 
   // Section P: For business stress findings, compare businessAffordabilityStatus
   const demandStress = stressResults.find(s => s.name === 'DEMAND_DROP_20');
-  if (demandStress && (demandStress.businessAffordabilityStatus === 'HIGH_RISK' || demandStress.operatingSurplus <= 0)) {
+  if (demandStress && (demandStress.businessAffordabilityStatus === 'HIGH_RISK' || (demandStress.operatingSurplus != null && demandStress.operatingSurplus <= 0))) {
     findings.push({
       risk: 'Demand-shock sensitivity',
       category: 'Market Risk',
       severity: 'Medium',
       impact: 'Medium',
       source: 'AARTHIKA_CALCULATION',
-      detail: `A 20% drop in sales volume causes business stress (surplus: ${formatINR(demandStress.operatingSurplus)}, status: ${demandStress.businessAffordabilityStatus}).`,
+      detail: `A 20% drop in sales volume causes business stress (surplus: ${demandStress.operatingSurplus != null ? formatINR(demandStress.operatingSurplus) : 'N/A'}, status: ${demandStress.businessAffordabilityStatus}).`,
     });
   }
 
   const rawMatStress = stressResults.find(s => s.name === 'RAW_MATERIAL_UP_20');
-  if (rawMatStress && (rawMatStress.businessAffordabilityStatus === 'HIGH_RISK' || rawMatStress.operatingSurplus <= 0)) {
+  if (rawMatStress && (rawMatStress.businessAffordabilityStatus === 'HIGH_RISK' || (rawMatStress.operatingSurplus != null && rawMatStress.operatingSurplus <= 0))) {
     findings.push({
       risk: 'Input-cost sensitivity',
       category: 'Operational Risk',
       severity: 'Medium',
       impact: 'Medium',
       source: 'AARTHIKA_CALCULATION',
-      detail: `A 20% increase in raw material costs causes business stress (surplus: ${formatINR(rawMatStress.operatingSurplus)}, status: ${rawMatStress.businessAffordabilityStatus}).`,
+      detail: `A 20% increase in raw material costs causes business stress (surplus: ${rawMatStress.operatingSurplus != null ? formatINR(rawMatStress.operatingSurplus) : 'N/A'}, status: ${rawMatStress.businessAffordabilityStatus}).`,
     });
   }
 
@@ -1015,7 +1036,7 @@ function generateDynamicSwot(
 
   // Threats
   const demandStress = stressResults.find(s => s.name === 'DEMAND_DROP_20');
-  if (demandStress && demandStress.operatingSurplus <= 0) {
+  if (demandStress && demandStress.operatingSurplus != null && demandStress.operatingSurplus <= 0) {
     threats.push({
       finding: 'Vulnerable to 20% demand drop',
       whyItMatters: `Operating surplus turns negative (${formatINR(demandStress.operatingSurplus)}) with modest sales decline`,
@@ -1025,7 +1046,7 @@ function generateDynamicSwot(
   }
 
   const rawMatStress = stressResults.find(s => s.name === 'RAW_MATERIAL_UP_20');
-  if (rawMatStress && rawMatStress.operatingSurplus <= 0) {
+  if (rawMatStress && rawMatStress.operatingSurplus != null && rawMatStress.operatingSurplus <= 0) {
     threats.push({
       finding: 'Vulnerable to 20% input cost increase',
       whyItMatters: `Operating surplus turns negative (${formatINR(rawMatStress.operatingSurplus)}) with modest cost increase`,
@@ -1106,9 +1127,15 @@ export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<str
   } else if (readiness === 'HIGH_RISK') {
     humanLabel = 'Financial pressure detected';
     rationale = 'One or more critical thresholds are not met. Review the specific risk findings.';
-  } else if (readiness === 'OUT_OF_SCOPE') {
+  } else if (readiness === 'OUT_OF_SCOPE' || snapshot.schemeTerms?.isOutOfScope || snapshot.financingAnalysisStatus === 'OUT_OF_SCOPE') {
     humanLabel = 'Outside this scheme route';
     rationale = 'Project cost exceeds maximum limit for the available scheme.';
+  } else if (
+    snapshot.businessAffordabilityStatus === 'HIGH_RISK' &&
+    (snapshot.householdAffordabilityStatus === 'INCOMPLETE' || snapshot.householdAffordabilityStatus === 'INSUFFICIENT_DATA')
+  ) {
+    humanLabel = 'Business financial pressure detected';
+    rationale = 'Household affordability still needs more information.';
   }
 
   return {
@@ -1136,6 +1163,9 @@ export function snapshotToDashboardData(snapshot: AnalyticsSnapshot): Record<str
         : null,
       loanEMI: snapshot.candidateEmi,
       operatingSurplus: snapshot.operatingSurplus,
+      postEmiCashFlow: snapshot.candidateEmi != null && snapshot.operatingSurplus != null
+        ? snapshot.operatingSurplus - snapshot.candidateEmi
+        : null,
       netCashFlow: snapshot.operatingSurplus,
       breakEvenRevenue: snapshot.breakEvenRevenue,
       breakEvenUnits: snapshot.breakEvenUnits,

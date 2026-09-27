@@ -63,5 +63,35 @@
     },
     "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"monthly_units_sold\":\"250\",\"selling_price_per_unit\":\"20\",\"variable_cost_per_unit\":\"12\"}",
     "expected_hash": "e74406bc09f7e6a823dd5eb87012d287899c511457bfe357f177ddb7eb49dc93"
+  },
+  {
+    "id": "case_6_small_decimal",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": 0.000001,
+      "selling_price_per_unit": 100
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"monthly_units_sold\":\"0.000001\",\"selling_price_per_unit\":\"100\"}",
+    "expected_hash": "d7c44299cd23ce744e6060774ace92fa266ec21c0042a31900c6fd0c2856100a"
+  },
+  {
+    "id": "case_7_large_integer",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": 1000000000,
+      "selling_price_per_unit": 50
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"monthly_units_sold\":\"1000000000\",\"selling_price_per_unit\":\"50\"}",
+    "expected_hash": "2d7a6703b044546b43b27f8d4ec400808239b84d84c62c8309bca4370331cb07"
+  },
+  {
+    "id": "case_8_negative_zero",
+    "policy_version": "1.0.0",
+    "inputs": {
+      "monthly_units_sold": -0,
+      "selling_price_per_unit": 75
+    },
+    "expected_compact_json": "{\"_policy_version\":\"1.0.0\",\"monthly_units_sold\":\"0\",\"selling_price_per_unit\":\"75\"}",
+    "expected_hash": "610523070eeebfcd37fcc6be56379bda1bfb181ef4e0b07486538909b36a7114"
   }
 ]

@@ -213,33 +213,39 @@ async def generate_business_report(
     # 8. Deterministic stress cases
     stress_results: List[Dict[str, Any]] = []
 
-    # DEMAND_DROP_20
-    if "monthly_units_sold" in canonical_inputs and canonical_inputs["monthly_units_sold"] is not None:
+    has_core_economics = (
+        canonical_inputs.get("monthly_units_sold") is not None
+        and canonical_inputs.get("selling_price_per_unit") is not None
+        and canonical_inputs.get("variable_cost_per_unit") is not None
+        and canonical_inputs.get("monthly_fixed_cost") is not None
+    )
+
+    if has_core_economics:
+        # DEMAND_DROP_20
         demand_inputs = {**canonical_inputs}
         demand_inputs["monthly_units_sold"] = round(float(demand_inputs["monthly_units_sold"]) * 0.80)
         demand_res = calculate_financial_assessment(demand_inputs, policy, allow_stage_overrides=False)
         stress_results.append({
             "name": "DEMAND_DROP_20",
             "label": "Sales −20%",
-            "revenue": float(demand_res.get("monthly_revenue") or 0),
-            "operatingSurplus": float(demand_res.get("monthly_operating_surplus") or 0),
-            "dscr": float(demand_res.get("business_dscr")) if demand_res.get("business_dscr") is not None else None,
+            "revenue": float(demand_res["monthly_revenue"]) if demand_res.get("monthly_revenue") is not None else None,
+            "operatingSurplus": float(demand_res["monthly_operating_surplus"]) if demand_res.get("monthly_operating_surplus") is not None else None,
+            "dscr": float(demand_res["business_dscr"]) if demand_res.get("business_dscr") is not None else None,
             "businessAffordabilityStatus": demand_res.get("business_affordability_status") or "INCOMPLETE",
             "householdAffordabilityStatus": demand_res.get("household_affordability_status") or "INCOMPLETE",
             "overallReadiness": demand_res.get("overall_readiness") or "INCOMPLETE",
         })
 
-    # RAW_MATERIAL_UP_20
-    if "variable_cost_per_unit" in canonical_inputs and canonical_inputs["variable_cost_per_unit"] is not None:
+        # RAW_MATERIAL_UP_20
         raw_inputs = {**canonical_inputs}
         raw_inputs["variable_cost_per_unit"] = float(raw_inputs["variable_cost_per_unit"]) * 1.20
         raw_res = calculate_financial_assessment(raw_inputs, policy, allow_stage_overrides=False)
         stress_results.append({
             "name": "RAW_MATERIAL_UP_20",
             "label": "Input Cost +20%",
-            "revenue": float(raw_res.get("monthly_revenue") or 0),
-            "operatingSurplus": float(raw_res.get("monthly_operating_surplus") or 0),
-            "dscr": float(raw_res.get("business_dscr")) if raw_res.get("business_dscr") is not None else None,
+            "revenue": float(raw_res["monthly_revenue"]) if raw_res.get("monthly_revenue") is not None else None,
+            "operatingSurplus": float(raw_res["monthly_operating_surplus"]) if raw_res.get("monthly_operating_surplus") is not None else None,
+            "dscr": float(raw_res["business_dscr"]) if raw_res.get("business_dscr") is not None else None,
             "businessAffordabilityStatus": raw_res.get("business_affordability_status") or "INCOMPLETE",
             "householdAffordabilityStatus": raw_res.get("household_affordability_status") or "INCOMPLETE",
             "overallReadiness": raw_res.get("overall_readiness") or "INCOMPLETE",
@@ -296,9 +302,65 @@ async def generate_business_report(
     input_hash = compute_input_hash(canonical_inputs, policy_version)
     calculation_timestamp = int(time.time() * 1000)
 
+    user_provided_fields: List[str] = []
+    if latest_assumption:
+        if latest_assumption.monthly_units_sold is not None or (latest_assumption.production_volume is not None and float(latest_assumption.production_volume) > 0):
+            user_provided_fields.append("monthly_units_sold")
+        if latest_assumption.selling_price_per_unit is not None or (latest_assumption.selling_price is not None and float(latest_assumption.selling_price) > 0):
+            user_provided_fields.append("selling_price_per_unit")
+        if latest_assumption.variable_cost_per_unit is not None or (latest_assumption.raw_material_cost is not None and float(latest_assumption.raw_material_cost) > 0):
+            user_provided_fields.append("variable_cost_per_unit")
+        if latest_assumption.monthly_fixed_cost is not None or any(
+            x is not None for x in [
+                latest_assumption.monthly_labour_cost,
+                latest_assumption.monthly_rent,
+                latest_assumption.monthly_transport_cost,
+                latest_assumption.monthly_other_fixed_cost
+            ]
+        ):
+            user_provided_fields.append("monthly_fixed_cost")
+        if latest_assumption.monthly_household_nonbusiness_income is not None:
+            user_provided_fields.append("monthly_household_nonbusiness_income")
+        if latest_assumption.monthly_household_essential_expenses is not None:
+            user_provided_fields.append("monthly_household_essential_expenses")
+        if latest_assumption.existing_monthly_household_debt_payments is not None:
+            user_provided_fields.append("existing_monthly_household_debt_payments")
+        if latest_assumption.requested_loan_amount is not None:
+            user_provided_fields.append("requested_loan_amount")
+    if available_margin is not None:
+        user_provided_fields.append("available_margin_capital")
+
+    gov_rules: List[str] = []
+    if scheme and not scheme.get("is_out_of_scope"):
+        gov_rules.extend([
+            f"scheme_route: {scheme.get('scheme_name')}",
+            f"maximum_scheme_loan_amount: {scheme.get('scheme_loan_cap')}",
+            f"annual_interest_rate_percent: {scheme.get('interest_rate')}%",
+            f"repayment_tenure_months: {scheme.get('active_repayment_months')}",
+            f"moratorium_months: {scheme.get('moratorium_months')}",
+        ])
+
+    calculations: List[str] = [
+        "monthly_revenue",
+        "monthly_operating_surplus",
+        "break_even",
+        "candidate_emi",
+        "business_dscr",
+        "affordable_loan_amount",
+        "recommended_loan_amount",
+    ]
+    user_requested_loan = latest_assumption and latest_assumption.requested_loan_amount is not None
+    if not user_requested_loan and "requested_loan_amount" in canonical_inputs:
+        calculations.append("auto_derived_requested_loan")
+    if scheme and not scheme.get("is_out_of_scope"):
+        calculations.append("project_cost_from_margin")
+    if stress_results:
+        calculations.append("stress_results")
+
     provenance = {
-        "user_provided_fields": [k for k, v in canonical_inputs.items() if v is not None],
-        "aarthika_calculations": ["revenue", "surplus", "break_even", "candidate_emi", "business_dscr", "stress_tests"],
+        "user_provided_fields": user_provided_fields,
+        "aarthika_calculations": calculations,
+        "government_rules": gov_rules if gov_rules else ["NONE"],
         "government_rule": scheme.get("scheme_name") if scheme and not scheme.get("is_out_of_scope") else "NONE",
         "market_data_status": market_data_status,
         "location_source": location_source,

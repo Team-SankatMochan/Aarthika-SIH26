@@ -3,7 +3,7 @@
  * "Clarity Before Credit"
  */
 
-import React, { useState, useEffect, createContext, useContext, useRef, useCallback } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef, useCallback, useMemo } from 'react';
 import { router } from 'expo-router';
 import { api, isBackendConfigured } from '../services/api';
 import { speak, stopSpeaking } from '../services/tts';
@@ -843,14 +843,24 @@ function BusinessDetailsScreen() {
   const numExistingEMI = parseNumOrNull(existingEMI);
   const numLoan = parseNumOrNull(requestedLoanAmount);
 
-  // Business Operating Surplus = Revenue - Variable Costs - Fixed Business Costs
-  // Household expenses are NEVER subtracted from business operating surplus (Section D)
-  const monthlyRevenue = numSales !== null && numPrice !== null ? numSales * numPrice : null;
-  const monthlyVariableCost = numSales !== null && numCost !== null ? numSales * numCost : null;
-  const operatingSurplus =
-    monthlyRevenue !== null && monthlyVariableCost !== null && numFixed !== null
-      ? monthlyRevenue - monthlyVariableCost - numFixed
-      : null;
+  // Canonical analytics snapshot for live preview — NO UI financial calculations
+  const previewPlanInputs: BusinessPlanInputs = useMemo(() => ({
+    monthlyUnitsSold: numSales,
+    sellingPricePerUnit: numPrice,
+    variableCostPerUnit: numCost,
+    monthlyBusinessFixedCost: numFixed,
+    setupCost: numSetup,
+    availableMarginCapital: numMargin,
+    householdEssentialExpenses: numHouseholdExp,
+    householdNonBusinessIncome: numHouseholdInc,
+    existingHouseholdEMI: numExistingEMI,
+    requestedLoanAmount: numLoan,
+  }), [numSales, numPrice, numCost, numFixed, numSetup, numMargin, numHouseholdExp, numHouseholdInc, numExistingEMI, numLoan]);
+
+  const liveSnapshot = useMemo(() => generateAnalyticsSnapshot(previewPlanInputs), [previewPlanInputs]);
+  const monthlyRevenue = liveSnapshot.monthlyRevenue;
+  const monthlyVariableCost = liveSnapshot.monthlyVariableCost;
+  const operatingSurplus = liveSnapshot.operatingSurplus;
 
   const handleSaveAndViewPlan = () => {
     // Confirm all visible unedited preset fields on save (Section F)
@@ -1114,18 +1124,28 @@ function BusinessDetailsScreen() {
           </View>
         </View>
 
-        {/* Live Business Operating Surplus Preview — NO household deduction (Section D) */}
-        <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: COLORS.outlineVariant, marginTop: 10, paddingTop: 10 }]}>
-          <Text style={[styles.breakdownLabel, { fontWeight: '800' }]}>
-            {t('operating_surplus') || 'Business Operating Surplus'}
-          </Text>
-          <Text style={[styles.breakdownValue, { fontWeight: '800', color: (operatingSurplus ?? 0) >= 0 ? COLORS.secondary : COLORS.error }]}>
-            {fmt(operatingSurplus)}
+        {/* Live Business Economics Preview — from canonical analytics snapshot (Section D) */}
+        <View style={{ borderTopWidth: 1, borderTopColor: COLORS.outlineVariant, marginTop: 10, paddingTop: 10 }}>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>{t('monthly_revenue_label') || 'Estimated Monthly Revenue'}</Text>
+            <Text style={styles.breakdownValue}>{fmt(monthlyRevenue)}</Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownLabel}>{t('variable_cost_label') || 'Estimated Monthly Variable Cost'}</Text>
+            <Text style={styles.breakdownValue}>{monthlyVariableCost != null ? `−${fmt(monthlyVariableCost)}` : fmt(null)}</Text>
+          </View>
+          <View style={[styles.breakdownRow, { marginTop: 4 }]}>
+            <Text style={[styles.breakdownLabel, { fontWeight: '800' }]}>
+              {t('operating_surplus') || 'Business Operating Surplus'}
+            </Text>
+            <Text style={[styles.breakdownValue, { fontWeight: '800', color: (operatingSurplus ?? 0) >= 0 ? COLORS.secondary : COLORS.error }]}>
+              {fmt(operatingSurplus)}
+            </Text>
+          </View>
+          <Text style={{ fontSize: 11, color: COLORS.outline, marginTop: 2 }}>
+            {t('surplus_note') || 'Revenue − Variable Costs − Business Fixed Costs (excludes household expenses)'}
           </Text>
         </View>
-        <Text style={{ fontSize: 11, color: COLORS.outline, marginTop: 2 }}>
-          {t('surplus_note') || 'Revenue − Variable Costs − Business Fixed Costs (excludes household expenses)'}
-        </Text>
       </View>
 
       {/* 3. HOUSEHOLD AFFORDABILITY INPUTS (Sections D, E) */}
@@ -1299,6 +1319,7 @@ function MyPlanScreen() {
     if (status === 'VIABLE') return t('viable') || 'Viable';
     if (status === 'READY_FOR_FINANCE_REVIEW') return '✅ ' + (t('ready_for_review') || 'Ready for Review');
     if (status === 'HIGH_RISK') return '⚠️ ' + (t('high_risk') || 'High Risk');
+    if (status === 'OUT_OF_SCOPE') return '🚫 ' + (t('out_of_scope') || 'OUT_OF_SCOPE');
     if (status === 'INCOMPLETE') return '📝 ' + (t('incomplete') || 'Incomplete');
     if (status === 'INSUFFICIENT_DATA') return '📝 ' + (t('insufficient_data') || 'Need more information');
     return status;
@@ -1404,38 +1425,47 @@ function MyPlanScreen() {
       </View>
 
       {/* Financing — only if margin capital or loan is available */}
-      {(snapshot.candidateEmi != null || snapshot.schemeTerms) && (
+      {(snapshot.candidateEmi != null || snapshot.schemeTerms || snapshot.financingAnalysisStatus === 'OUT_OF_SCOPE') && (
         <View style={[styles.card, { marginTop: 8 }]}>
           <Text style={styles.cardSectionTitle}>{t('financing_analysis') || 'Financing Analysis'}</Text>
-          {snapshot.schemeTerms && !snapshot.schemeTerms.isOutOfScope && (
+          {snapshot.financingAnalysisStatus === 'OUT_OF_SCOPE' || snapshot.schemeTerms?.isOutOfScope ? (
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>{t('scheme_type') || 'Scheme'}</Text>
-              <Text style={styles.breakdownValue}>{snapshot.schemeTerms.schemeName} @ {snapshot.schemeTerms.interestRate}%</Text>
+              <Text style={styles.breakdownLabel}>{t('financing_status') || 'Financing Status'}</Text>
+              <Text style={[styles.breakdownValue, { color: COLORS.error, fontWeight: '700' }]}>OUT_OF_SCOPE</Text>
             </View>
-          )}
-          <View style={styles.breakdownRow}>
-            <Text style={styles.breakdownLabel}>{t('candidate_emi') || 'Candidate EMI'}</Text>
-            <Text style={styles.breakdownValue}>{fmt(snapshot.candidateEmi)}</Text>
-          </View>
-          <View style={styles.breakdownRow}>
-            <Text style={styles.breakdownLabel}>{t('business_dscr') || 'Business DSCR'}</Text>
-            <Text style={[styles.breakdownValue, { color: (snapshot.businessDscr ?? 0) >= AARTHIKA_CALCULATION_POLICY.minimum_required_dscr ? COLORS.secondary : COLORS.error }]}>
-              {snapshot.businessDscr != null ? snapshot.businessDscr.toFixed(2) : fmt(null)}
-            </Text>
-          </View>
-          <View style={styles.breakdownRow}>
-            <Text style={styles.breakdownLabel}>{t('max_affordable_emi') || 'Max Affordable EMI'}</Text>
-            <Text style={styles.breakdownValue}>{fmt(snapshot.maximumAffordableEmi)}</Text>
-          </View>
-          <View style={styles.breakdownRow}>
-            <Text style={styles.breakdownLabel}>{t('affordable_loan') || 'Affordable Loan Amount'}</Text>
-            <Text style={styles.breakdownValue}>{fmt(snapshot.affordableLoanAmount)}</Text>
-          </View>
-          {snapshot.recommendedLoanAmount != null && (
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>{t('recommended_loan') || 'Recommended Loan'}</Text>
-              <Text style={[styles.breakdownValue, { color: COLORS.secondary }]}>{fmt(snapshot.recommendedLoanAmount)}</Text>
-            </View>
+          ) : (
+            <>
+              {snapshot.schemeTerms && !snapshot.schemeTerms.isOutOfScope && (
+                <View style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>{t('scheme_type') || 'Scheme'}</Text>
+                  <Text style={styles.breakdownValue}>{snapshot.schemeTerms.schemeName} @ {snapshot.schemeTerms.interestRate}%</Text>
+                </View>
+              )}
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>{t('candidate_emi') || 'Candidate EMI'}</Text>
+                <Text style={styles.breakdownValue}>{fmt(snapshot.candidateEmi)}</Text>
+              </View>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>{t('business_dscr') || 'Business DSCR'}</Text>
+                <Text style={[styles.breakdownValue, { color: (snapshot.businessDscr ?? 0) >= AARTHIKA_CALCULATION_POLICY.minimum_required_dscr ? COLORS.secondary : COLORS.error }]}>
+                  {snapshot.businessDscr != null ? snapshot.businessDscr.toFixed(2) : fmt(null)}
+                </Text>
+              </View>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>{t('max_affordable_emi') || 'Max Affordable EMI'}</Text>
+                <Text style={styles.breakdownValue}>{fmt(snapshot.maximumAffordableEmi)}</Text>
+              </View>
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>{t('affordable_loan') || 'Affordable Loan Amount'}</Text>
+                <Text style={styles.breakdownValue}>{fmt(snapshot.affordableLoanAmount)}</Text>
+              </View>
+              {snapshot.recommendedLoanAmount != null && (
+                <View style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>{t('recommended_loan') || 'Recommended Loan'}</Text>
+                  <Text style={[styles.breakdownValue, { color: COLORS.secondary }]}>{fmt(snapshot.recommendedLoanAmount)}</Text>
+                </View>
+              )}
+            </>
           )}
         </View>
       )}

@@ -567,4 +567,68 @@ describe('Aarthika Business Analytics Consolidation Suite', () => {
     expect(snap.provenance.calculations.some((c: string) => c.includes('Candidate EMI'))).toBe(true);
     expect(snap.provenance.calculations.some((c: string) => c.includes('Break-even'))).toBe(true);
   });
+
+  // 25. OUT_OF_SCOPE propagation for >₹50 lakh routes
+  test('Test 25: Large project (>₹50L) propagates OUT_OF_SCOPE in snapshot and dashboard recommendation', () => {
+    // 6,000,000 margin capital -> project cost > 50L -> out of scope
+    const largePlan: BusinessPlanInputs = {
+      sellingPricePerUnit: 100,
+      variableCostPerUnit: 50,
+      monthlyUnitsSold: 1000,
+      monthlyBusinessFixedCost: 10000,
+      availableMarginCapital: 6000000,
+    };
+    const snap = generateAnalyticsSnapshot(largePlan);
+    expect(snap.schemeTerms?.isOutOfScope).toBe(true);
+    expect(snap.financingAnalysisStatus).toBe('OUT_OF_SCOPE');
+    expect(snap.overallReadiness).toBe('OUT_OF_SCOPE');
+
+    const dash = snapshotToDashboardData(snap);
+    expect(dash.recommendation.decision).toBe('OUT_OF_SCOPE');
+    expect(dash.recommendation.decisionLabel).toBe('Outside this scheme route');
+  });
+
+  // 26. Business HIGH_RISK preserved when household data is missing
+  test('Test 26: Loss-making business with missing household data shows business pressure while overall remains INCOMPLETE', () => {
+    const lossPlan: BusinessPlanInputs = {
+      sellingPricePerUnit: 30,
+      variableCostPerUnit: 40, // Loss making!
+      monthlyUnitsSold: 500,
+      monthlyBusinessFixedCost: 5000,
+      // Household data completely omitted
+    };
+    const snap = generateAnalyticsSnapshot(lossPlan);
+    expect(snap.businessAffordabilityStatus).toBe('HIGH_RISK');
+    expect(snap.householdAffordabilityStatus).toBe('INSUFFICIENT_DATA');
+    // Canonical overallReadiness must remain INCOMPLETE
+    expect(snap.overallReadiness).toBe('INCOMPLETE');
+
+    const dash = snapshotToDashboardData(snap);
+    expect(dash.deterministicMetrics.businessReadiness).toBe('HIGH_RISK');
+    expect(dash.deterministicMetrics.householdReadiness).toBe('INSUFFICIENT_DATA');
+    expect(dash.deterministicMetrics.overallReadiness).toBe('INCOMPLETE');
+    expect(dash.recommendation.decisionLabel).toBe('Business financial pressure detected');
+    expect(dash.recommendation.rationale).toBe('Household affordability still needs more information.');
+  });
+
+  // 27. Stress tests return empty when fixed cost or price is missing (no fake ₹0)
+  test('Test 27: Missing fixed cost or missing selling price returns no stress scenarios (no ₹0 revenue or surplus)', () => {
+    const missingFixed: BusinessPlanInputs = {
+      sellingPricePerUnit: 50,
+      variableCostPerUnit: 20,
+      monthlyUnitsSold: 300,
+      // monthlyBusinessFixedCost missing!
+    };
+    const snapNoFixed = generateAnalyticsSnapshot(missingFixed);
+    expect(snapNoFixed.stressResults).toEqual([]);
+
+    const missingPrice: BusinessPlanInputs = {
+      variableCostPerUnit: 20,
+      monthlyUnitsSold: 300,
+      monthlyBusinessFixedCost: 3000,
+      // sellingPricePerUnit missing!
+    };
+    const snapNoPrice = generateAnalyticsSnapshot(missingPrice);
+    expect(snapNoPrice.stressResults).toEqual([]);
+  });
 });

@@ -443,3 +443,83 @@ def test_30_decision_service_canonical_assumption_summary(db_session):
     assert "selling_price" not in dec.assumptions_summary
     assert "production_volume" not in dec.assumptions_summary
 
+
+def test_31_explicit_backend_provenance_classification(client, db_session):
+    """Test 31: Provenance explicitly separates user inputs, government rules, and Aarthika calculations."""
+    user = User(id="user_test_31", name="Rekha", available_capital=Decimal("15000.00"))
+    db_session.add(user)
+    db_session.commit()
+
+    biz = Business(id="biz_test_31", user_id=user.id, business_name="Pottery", business_category="Manufacturing")
+    db_session.add(biz)
+    db_session.commit()
+
+    a = BusinessAssumption(
+        business_id=biz.id,
+        monthly_units_sold=Decimal("600"),
+        selling_price_per_unit=Decimal("45"),
+        variable_cost_per_unit=Decimal("20"),
+        monthly_fixed_cost=Decimal("4000"),
+        available_margin_capital=Decimal("15000"),
+        # requested_loan_amount is NOT provided by user
+    )
+    db_session.add(a)
+    db_session.commit()
+
+    report = client.post("/ai/generate-report", json={"business_id": biz.id}).json()
+    prov = report["provenance"]
+
+    # User provided fields must only contain confirmed user inputs
+    user_fields = prov["user_provided_fields"]
+    assert "monthly_units_sold" in user_fields
+    assert "selling_price_per_unit" in user_fields
+    assert "variable_cost_per_unit" in user_fields
+    assert "monthly_fixed_cost" in user_fields
+    assert "available_margin_capital" in user_fields
+
+    # Government rules must NOT be classified as user-provided
+    assert "maximum_scheme_loan_amount" not in user_fields
+    assert "annual_interest_rate_percent" not in user_fields
+    assert "repayment_tenure_months" not in user_fields
+    assert "moratorium_months" not in user_fields
+    assert "requested_loan_amount" not in user_fields  # was auto-derived
+
+    # Government rules must exist in government_rules
+    assert any("scheme_route:" in r for r in prov["government_rules"])
+    assert any("annual_interest_rate_percent:" in r for r in prov["government_rules"])
+
+    # Calculations must include auto_derived_requested_loan and project_cost_from_margin
+    calcs = prov["aarthika_calculations"]
+    assert "auto_derived_requested_loan" in calcs
+    assert "project_cost_from_margin" in calcs
+    assert "candidate_emi" in calcs
+    assert "business_dscr" in calcs
+
+
+def test_32_missing_core_economics_stress_tests_empty(client, db_session):
+    """Test 32: Missing fixed cost or selling price results in empty stress tests without fake ₹0."""
+    user = User(id="user_test_32", name="Kiran", available_capital=Decimal("10000.00"))
+    db_session.add(user)
+    db_session.commit()
+
+    biz = Business(id="biz_test_32", user_id=user.id, business_name="Services", business_category="Services")
+    db_session.add(biz)
+    db_session.commit()
+
+    # monthly_fixed_cost is missing
+    a = BusinessAssumption(
+        business_id=biz.id,
+        monthly_units_sold=Decimal("300"),
+        selling_price_per_unit=Decimal("50"),
+        variable_cost_per_unit=Decimal("20"),
+    )
+    db_session.add(a)
+    db_session.commit()
+
+    report = client.post("/ai/generate-report", json={"business_id": biz.id}).json()
+    snap = report["deterministic_snapshot"]
+
+    # Stress results must be empty, never manufactured ₹0
+    assert snap["stress_results"] == []
+
+
