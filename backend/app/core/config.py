@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "arthsetu_user"
     POSTGRES_PASSWORD: str = "arthsetu_password"
     POSTGRES_DB: str = "arthsetu_db"
-    DATABASE_URL: str = "postgresql://arthsetu_user:arthsetu_password@localhost:5432/arthsetu_db"
+    DATABASE_URL: str = "sqlite:///./test.db"
 
     # Phase 2 P2: Evidence Provider Configuration
     PROVIDER_MODE: str = "MOCK"  # "MOCK" or "LIVE"
