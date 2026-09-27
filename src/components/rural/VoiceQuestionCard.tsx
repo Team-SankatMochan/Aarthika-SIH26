@@ -71,6 +71,13 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
       return;
     }
 
+    if (!sttService.isSupported()) {
+      setParseError('माइक इस डिवाइस पर उपलब्ध नहीं है। कृपया नीचे लिखकर उत्तर दें।');
+      speak(question.prompt_hi, 'hi');
+      setUiState('IDLE');
+      return;
+    }
+
     setParseError('');
     setUiState('LISTENING');
     sttService.startListening({

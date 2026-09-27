@@ -62,6 +62,14 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
   }, [listening]);
 
   const startVoiceListening = useCallback(() => {
+    if (!sttService.isSupported()) {
+      setErrorMsg(
+        currentLang === 'hi'
+          ? 'माइक इस डिवाइस पर उपलब्ध नहीं है। कृपया नीचे नंबर लिखें।'
+          : 'Voice recognition is not available on this device. Please type the number below.'
+      );
+      return;
+    }
     setErrorMsg(null);
     setListening(true);
 
@@ -101,7 +109,9 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
       setParsedResult(null);
       setManualInput('');
       setErrorMsg(null);
-      startVoiceListening();
+      if (sttService.isSupported()) {
+        startVoiceListening();
+      }
     } else {
       sttService.stopListening();
       setListening(false);
@@ -188,11 +198,9 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
                 ? `${t('voice_listening') || 'Listening...'} (${langNames[currentLang] || 'English'})`
                 : t('voice_tap_to_speak') || 'Tap mic to speak'}
             </Text>
-            {Platform.OS !== 'web' && (
-              <Text style={{ color: '#d32f2f', fontSize: 10, marginTop: 5, fontWeight: 'bold' }}>
-                DEMO VOICE INPUT
-              </Text>
-            )}
+            <Text style={{ color: '#8e4e14', fontSize: 10, marginTop: 5, fontWeight: 'bold' }}>
+              🎙️ {t('live_voice_active') || 'LIVE VOICE RECOGNITION'}
+            </Text>
           </View>
 
           {/* Recognized Text & Interpretation */}

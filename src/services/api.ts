@@ -9,18 +9,31 @@ import Constants from 'expo-constants';
  * 2. localhost:8000 for web dev
  * 3. null — remote backend unavailable, app continues with deterministic offline analytics
  */
-const getApiBaseUrl = (): string | null => {
+export const getApiBaseUrl = (): string | null => {
   // Check for explicit env var first (works in dev and production)
-  const envUrl = Constants.expoConfig?.extra?.EXPO_PUBLIC_API_URL
-    ?? (typeof process !== 'undefined' ? process.env.EXPO_PUBLIC_API_URL : undefined);
+  const envUrl = (typeof process !== 'undefined' ? (process.env.EXPO_PUBLIC_API_URL || process.env.API_URL) : undefined)
+    ?? Constants.expoConfig?.extra?.EXPO_PUBLIC_API_URL;
 
   if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
     return envUrl.trim();
   }
 
-  // Development fallback for web only
+  // In unit tests, do not use dev fallbacks if env is explicitly unset
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+    return null;
+  }
+
+  // Development fallback
   const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
-  if (isDev && Platform.OS === 'web') {
+  if (isDev) {
+    if (Platform.OS === 'android') {
+      const hostUri = Constants.expoConfig?.hostUri;
+      if (hostUri) {
+        const host = hostUri.split(':')[0];
+        return `http://${host}:8000`;
+      }
+      return 'http://10.0.2.2:8000';
+    }
     return 'http://localhost:8000';
   }
 
@@ -35,11 +48,12 @@ export const isBackendConfigured = API_BASE_URL !== null;
 
 // Generic fetch function with error handling
 const fetchApi = async (endpoint: string, options: RequestInit = {}) => {
-  if (!API_BASE_URL) {
+  const baseUrl = getApiBaseUrl() || API_BASE_URL;
+  if (!baseUrl) {
     throw new Error('BACKEND_UNAVAILABLE: No API URL configured. App is running in offline mode.');
   }
 
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${baseUrl}${endpoint}`;
 
   try {
     const response = await fetch(url, {

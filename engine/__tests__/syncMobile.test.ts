@@ -1,6 +1,17 @@
 jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(() => 'mock-uuid')
 }));
+jest.mock('react-native', () => ({
+  Platform: { OS: 'android' }
+}));
+jest.mock('expo-constants', () => ({
+  default: {
+    expoConfig: {
+      extra: {},
+      hostUri: 'localhost:8081'
+    }
+  }
+}));
 
 import { syncData } from '../../src/services/syncService';
 import { database } from '../../model';
@@ -48,5 +59,11 @@ describe('Mobile Sync Service', () => {
         const pushCall = (global.fetch as jest.Mock).mock.calls.find(call => call[1] && call[1].method === 'POST');
         expect(pushCall).toBeDefined();
         // Just verify fetch was called. 
+    });
+
+    it('should throw SyncDisabledError when API URL is not configured', async () => {
+        delete process.env.EXPO_PUBLIC_API_URL;
+        delete process.env.API_URL;
+        await expect(syncData()).rejects.toThrow('Remote sync is disabled');
     });
 });

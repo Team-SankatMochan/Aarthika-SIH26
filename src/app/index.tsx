@@ -84,6 +84,89 @@ export function buildAssumptionsPayload(biz: any, businessId: string): Record<st
   };
 }
 
+/**
+ * Dynamically initialize a live business plan from user voice/text input.
+ * Maps recognized sectors to standard presets with presetSource: 'USER_PROVIDED',
+ * eliminating all demo tags and providing immediate live calculations.
+ */
+export function createDynamicBusinessPlan(title: string): any {
+  const cleanTitle = (title || '').trim();
+  const lower = cleanTitle.toLowerCase();
+
+  // Sector keyword matching across Hindi & English
+  let matchedSector: SectorItem | undefined;
+  if (/dairy|दूध|डेयरी|गाय|भैंस|cow|buffalo|cattle|milk/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'dairy');
+  } else if (/farm|खेती|किसान|कृषि|crop|vegetable|sabji|सबजी|फसल|धान|गेहूं/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'farming');
+  } else if (/poultry|मुर्गी|murgi|chicken|egg|अंडा/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'poultry');
+  } else if (/goat|बकरी|bakri|sheep|भेड़/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'goat');
+  } else if (/kirana|किराना|grocery|store|dukan|दुकान|general store|ration/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'kirana');
+  } else if (/tailor|दर्जी|सिलाई|sewing|cloth|कपड़े|boutique/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'tailoring');
+  } else if (/beauty|parlour|salon|ब्यूटी|पार्लर/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'beauty');
+  } else if (/garment|retail|कपड़ा/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'retail');
+  } else if (/repair|रिपेयर|मोबाइल|mobile/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'mobile_repair');
+  } else if (/carpenter|furniture|बढ़ई|लकड़ी/i.test(lower)) {
+    matchedSector = SECTOR_CATALOG.find((s) => s.id === 'carpentry');
+  }
+
+  if (!matchedSector) {
+    matchedSector = SECTOR_CATALOG.find((s) => lower.includes(s.id));
+  }
+
+  const presets = matchedSector?.presets || {
+    setupCost: 95000,
+    monthlyFixed: 4500,
+    unitType: 'Unit',
+    pricePerUnit: 400,
+    costPerUnit: 200,
+    salesPerMonth: 80,
+    personalCost: 8000,
+    breakdown: [
+      { label: 'Equipment & Workspace Setup', cost: 60000 },
+      { label: 'Initial Inventory & Material Buffer', cost: 35000 },
+    ],
+  };
+
+  const setupCost = presets.setupCost;
+  const margin = Math.round(setupCost * 0.15);
+  const loan = Math.max(0, setupCost - margin);
+
+  const plan = {
+    sector: matchedSector ? matchedSector.id : 'custom',
+    title: cleanTitle || (matchedSector ? matchedSector.id : 'My Business Plan'),
+    setupCost: presets.setupCost,
+    monthlyFixed: presets.monthlyFixed,
+    unitType: presets.unitType,
+    pricePerUnit: presets.pricePerUnit,
+    costPerUnit: presets.costPerUnit,
+    salesPerMonth: presets.salesPerMonth,
+    householdEssentialExpenses: presets.personalCost,
+    personalCost: presets.personalCost,
+    availableMarginCapital: margin,
+    requestedLoanAmount: loan,
+    householdIncome: 6000,
+    existingEMI: 0,
+    presetSource: 'USER_PROVIDED',
+    breakdown: presets.breakdown || [],
+  };
+
+  try {
+    AsyncStorage.setItem('@business_plan', JSON.stringify(plan));
+  } catch (_e) {
+    // ignore
+  }
+
+  return plan;
+}
+
 // Theme Colors matching Stitch approved palette
 export const COLORS = {
   primary: '#8e4e14',
@@ -434,9 +517,10 @@ export default function App() {
             t={t}
             currentLang={currentLang}
             onTranscript={(text: string) => {
-              setActiveBusiness(createBlankCustomBusiness(text));
+              const plan = createDynamicBusinessPlan(text);
+              setActiveBusiness(plan);
               setIsVoiceActive(false);
-              setCurrentScreen('business_details');
+              navigateTo('my_plan');
             }}
           />
         </SafeAreaView>
@@ -494,9 +578,9 @@ function HomeScreen() {
 
   const handleTextSubmit = () => {
     if (businessQuery.trim().length > 0) {
-      // Reset assumptions cleanly when starting a new custom business (Section B)
-      setActiveBusiness(createBlankCustomBusiness(businessQuery.trim()));
-      navigateTo('business_details');
+      const plan = createDynamicBusinessPlan(businessQuery.trim());
+      setActiveBusiness(plan);
+      navigateTo('my_plan');
     }
   };
 
@@ -1953,7 +2037,7 @@ function TouchlessAuthScreen() {
         : (currentLang === 'bn'
             ? 'নমস্কার! আর্থিকা-তে আপনাকে স্বাগতম। আপনার নাম কি?'
             : 'Welcome to Aarthika! What is your name?'),
-      placeholder: currentLang === 'hi' ? 'जैसे: रामेश्वर पाटिल / सुनीता देवी' : 'e.g. Rameshwar Patil / Sunita Devi',
+      placeholder: currentLang === 'hi' ? 'अपना नाम दर्ज करें (जैसे: परम नानकानी)' : 'Enter your name (e.g. Param Nankani)',
       value: name,
       setValue: setName,
     },
@@ -1968,7 +2052,7 @@ function TouchlessAuthScreen() {
         : (currentLang === 'bn'
             ? 'খুব ভালো! আপনি কোন গ্রাম বা শহরের বাসিন্দা?'
             : 'Nice to meet you! What is your village, town, or city?'),
-      placeholder: currentLang === 'hi' ? 'जैसे: बारामती, पुणे / वाराणसी' : 'e.g. Baramati, Pune / Varanasi',
+      placeholder: currentLang === 'hi' ? 'गाँव या शहर का नाम' : 'e.g. Pune / Varanasi',
       value: place,
       setValue: setPlace,
     },
@@ -1983,7 +2067,7 @@ function TouchlessAuthScreen() {
         : (currentLang === 'bn'
             ? 'চমৎকার! আপনি কি কাজ বা ব্যবসা করেন?'
             : 'What is your current work, trade, or occupation?'),
-      placeholder: currentLang === 'hi' ? 'जैसे: दूध डेयरी, सिलाई, किराना दुकान, खेती' : 'e.g. Dairy Farming, Tailoring, Kirana Store, Farming',
+      placeholder: currentLang === 'hi' ? 'जैसे: दूध डेयरी, सिलाई, किराना दुकान' : 'e.g. Dairy Farming, Tailoring, Kirana Store',
       value: occupation,
       setValue: setOccupation,
     },
@@ -2100,12 +2184,18 @@ function TouchlessAuthScreen() {
         },
         onResult: (transcript: string, isFinal: boolean) => {
           setLiveTranscript(transcript);
+          if (transcript.trim().length > 0) {
+            questions[step]?.setValue(transcript);
+          }
           if (isFinal && transcript.trim().length > 0) {
             handleSpeechReceived(transcript.trim());
           }
         },
-        onError: (_err) => {
+        onError: (err) => {
           setIsListening(false);
+          if (err && typeof err === 'string') {
+            setError(err);
+          }
         },
         onEnd: () => {
           setIsListening(false);
@@ -2427,6 +2517,60 @@ function TouchlessAuthScreen() {
               onSubmitEditing={handleNextStep}
             />
           </View>
+
+          {/* Quick suggestions for common places */}
+          {step === 1 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, width: '100%', marginTop: 8 }}>
+              {['पुणे / Pune', 'वाराणसी / Varanasi', 'नासिक / Nashik', 'बारामती / Baramati', 'इंदौर / Indore'].map((plc) => (
+                <TouchableOpacity
+                  key={plc}
+                  style={{
+                    backgroundColor: '#e8f5e9',
+                    borderColor: '#a5d6a7',
+                    borderWidth: 1,
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    borderRadius: 16,
+                  }}
+                  onPress={() => {
+                    const cleanPlc = plc.split('/')[0].trim();
+                    setPlace(cleanPlc);
+                    setError('');
+                    setStep(2);
+                  }}
+                >
+                  <Text style={{ fontSize: 12, color: '#2e7d32', fontWeight: '600' }}>{plc}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Quick suggestions for common occupations */}
+          {step === 2 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, width: '100%', marginTop: 8 }}>
+              {['दूध डेयरी / Dairy', 'खेती / Farming', 'मुर्गी पालन / Poultry', 'किराना / Kirana', 'सिलाई / Tailoring'].map((occ) => (
+                <TouchableOpacity
+                  key={occ}
+                  style={{
+                    backgroundColor: '#e8f5e9',
+                    borderColor: '#a5d6a7',
+                    borderWidth: 1,
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    borderRadius: 16,
+                  }}
+                  onPress={() => {
+                    const cleanOcc = occ.split('/')[0].trim();
+                    setOccupation(cleanOcc);
+                    setError('');
+                    setStep(3);
+                  }}
+                >
+                  <Text style={{ fontSize: 12, color: '#2e7d32', fontWeight: '600' }}>{occ}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {error ? (
             <View style={[styles.errorBox, { marginTop: 8 }]}>

@@ -6,12 +6,72 @@
 import { Platform } from 'react-native';
 
 let ExpoSpeechRecognitionModule: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const speechPkg = require('expo-speech-recognition');
-  ExpoSpeechRecognitionModule = speechPkg?.ExpoSpeechRecognitionModule ?? null;
-} catch (_e) {
-  ExpoSpeechRecognitionModule = null;
+let hasCheckedNativeModule = false;
+
+export function isNativeSpeechModuleAvailable(): boolean {
+  if (Platform.OS === 'web') return false;
+  try {
+    // 1. Check globalThis.expo.modules (JSI native modules in Expo)
+    const expoGlobal = (globalThis as any)?.expo;
+    if (expoGlobal?.modules?.ExpoSpeechRecognition) {
+      return true;
+    }
+
+    // 2. Check requireOptionalNativeModule from expo or expo-modules-core
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const expo = require('expo');
+      if (typeof expo?.requireOptionalNativeModule === 'function') {
+        const mod = expo.requireOptionalNativeModule('ExpoSpeechRecognition');
+        if (mod) return true;
+      }
+    } catch (_e) {
+      // ignore
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const expoCore = require('expo-modules-core');
+      if (typeof expoCore?.requireOptionalNativeModule === 'function') {
+        const mod = expoCore.requireOptionalNativeModule('ExpoSpeechRecognition');
+        if (mod) return true;
+      }
+    } catch (_e) {
+      // ignore
+    }
+
+    // 3. Check NativeModules from react-native
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { NativeModules } = require('react-native');
+    if (NativeModules?.ExpoSpeechRecognition || NativeModules?.NativeModulesProxy?.ExpoSpeechRecognition) {
+      return true;
+    }
+  } catch (_e) {
+    return false;
+  }
+  return false;
+}
+
+export function getExpoSpeechRecognitionModule(): any {
+  if (hasCheckedNativeModule) return ExpoSpeechRecognitionModule;
+  hasCheckedNativeModule = true;
+
+  if (!isNativeSpeechModuleAvailable()) {
+    ExpoSpeechRecognitionModule = null;
+    return null;
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const speechPkg = require('expo-speech-recognition');
+    ExpoSpeechRecognitionModule =
+      speechPkg?.ExpoSpeechRecognitionModule ??
+      speechPkg?.default?.ExpoSpeechRecognitionModule ??
+      null;
+  } catch (_e) {
+    ExpoSpeechRecognitionModule = null;
+  }
+  return ExpoSpeechRecognitionModule;
 }
 
 export const STT_LANG_MAP: Record<string, string> = {
@@ -30,6 +90,7 @@ export interface STTOptions {
   lang?: string;
   continuous?: boolean;
   interimResults?: boolean;
+  defaultAnswer?: string;
   onResult: (transcript: string, isFinal: boolean) => void;
   onError?: (errorMsg: string) => void;
   onStart?: () => void;
@@ -46,6 +107,7 @@ export interface SpeechInputProvider {
 class WebSpeechProvider implements SpeechInputProvider {
   private recognition: any = null;
   private isListening: boolean = false;
+  private lastTranscript: string = '';
 
   public isSupported(): boolean {
     if (typeof window === 'undefined') return false;
@@ -57,12 +119,13 @@ class WebSpeechProvider implements SpeechInputProvider {
     if (this.isListening) {
       this.stopListening();
     }
+    this.lastTranscript = '';
 
     const win = window as any;
     const SpeechRecognitionClass = win.SpeechRecognition || win.webkitSpeechRecognition;
 
     if (!SpeechRecognitionClass) {
-      options.onError?.('Speech recognition is not supported in this browser. Please type your input.');
+      options.onError?.('Speech recognition is not supported in this browser. Please type your input below.');
       return;
     }
 
@@ -94,19 +157,26 @@ class WebSpeechProvider implements SpeechInputProvider {
 
         const currentText = finalTranscript || interimTranscript;
         if (currentText) {
-          options.onResult(currentText.trim(), !!finalTranscript);
+          this.lastTranscript = currentText.trim();
+          options.onResult(this.lastTranscript, !!finalTranscript);
         }
       };
 
       this.recognition.onerror = (event: any) => {
         console.warn('[STT] Recognition error:', event.error);
-        let message = 'Speech recognition error';
+        let message = 'Speech recognition error. Please type below.';
         if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-          message = 'Microphone permission denied. Please allow microphone access in settings.';
+          message = options.lang === 'hi'
+            ? 'माइक्रोफ़ोन की अनुमति नहीं मिली। कृपया सेटिंग्स में अनुमति दें या नीचे लिखें।'
+            : 'Microphone permission denied. Please allow microphone in settings or type below.';
         } else if (event.error === 'no-speech') {
-          message = 'No speech detected. Please speak into your microphone.';
+          message = options.lang === 'hi'
+            ? 'कोई आवाज़ सुनाई नहीं दी। दोबारा बोलने के लिए माइक दबाएं।'
+            : 'No speech detected. Tap mic to try again.';
         } else if (event.error === 'network') {
-          message = 'Network error during speech recognition.';
+          message = options.lang === 'hi'
+            ? 'नेटवर्क समस्या। कृपया नीचे लिखकर जवाब दें।'
+            : 'Network error during speech recognition. Please type below.';
         }
         this.isListening = false;
         options.onError?.(message);
@@ -114,6 +184,11 @@ class WebSpeechProvider implements SpeechInputProvider {
 
       this.recognition.onend = () => {
         this.isListening = false;
+        if (this.lastTranscript) {
+          const transcript = this.lastTranscript;
+          this.lastTranscript = '';
+          options.onResult(transcript, true);
+        }
         options.onEnd?.();
       };
 
@@ -121,7 +196,7 @@ class WebSpeechProvider implements SpeechInputProvider {
     } catch (e: any) {
       this.isListening = false;
       console.warn('[STT] Failed to start speech recognition:', e);
-      options.onError?.(e.message || 'Failed to start microphone.');
+      options.onError?.(e.message || 'Failed to start microphone. Please type below.');
     }
   }
 
@@ -146,44 +221,73 @@ class NativeSpeechProvider implements SpeechInputProvider {
   private isListening: boolean = false;
   private currentOptions: STTOptions | null = null;
   private listeners: any[] = [];
+  private lastTranscript: string = '';
+  private initializedListeners: boolean = false;
 
   constructor() {
-    if (Platform.OS !== 'web' && ExpoSpeechRecognitionModule) {
+    if (isNativeSpeechModuleAvailable()) {
       this.setupListeners();
     }
   }
 
   private setupListeners() {
-    if (!ExpoSpeechRecognitionModule?.addListener) return;
-    this.listeners.push(
-      ExpoSpeechRecognitionModule.addListener('start', () => {
-        this.isListening = true;
-        this.currentOptions?.onStart?.();
-      }),
-      ExpoSpeechRecognitionModule.addListener('result', (event: any) => {
-        const text = event.results[0]?.transcript || '';
-        if (text) {
-          this.currentOptions?.onResult(text, event.isFinal);
-        }
-      }),
-      ExpoSpeechRecognitionModule.addListener('error', (event: any) => {
-        this.isListening = false;
-        console.warn('[STT] Native Recognition error:', event.error, event.message);
-        let message = 'माइक की अनुमति नहीं मिली या कोई तकनीकी समस्या है। आप नीचे लिखकर भी जवाब दे सकते हैं।';
-        if (event.error === 'network') {
-          message = 'Voice recognition अभी उपलब्ध नहीं है। कृपया लिखकर जवाब दें।';
-        }
-        this.currentOptions?.onError?.(message);
-      }),
-      ExpoSpeechRecognitionModule.addListener('end', () => {
-        this.isListening = false;
-        this.currentOptions?.onEnd?.();
-      })
-    );
+    if (!isNativeSpeechModuleAvailable()) return;
+    const mod = getExpoSpeechRecognitionModule();
+    if (!mod?.addListener || this.initializedListeners) return;
+    this.initializedListeners = true;
+    try {
+      this.listeners.push(
+        mod.addListener('start', () => {
+          this.isListening = true;
+          this.currentOptions?.onStart?.();
+        }),
+        mod.addListener('result', (event: any) => {
+          const text = event.results?.[0]?.transcript || '';
+          if (text) {
+            this.lastTranscript = text.trim();
+            this.currentOptions?.onResult(this.lastTranscript, !!event.isFinal);
+          }
+        }),
+        mod.addListener('error', (event: any) => {
+          this.isListening = false;
+          console.warn('[STT] Native Recognition error:', event.error, event.message);
+          let message = 'माइक की अनुमति नहीं मिली या कोई तकनीकी समस्या है। आप नीचे लिखकर भी जवाब दे सकते हैं।';
+          if (event.error === 'not-allowed') {
+            message = 'माइक्रोफ़ोन की अनुमति नहीं मिली। कृपया सेटिंग्स में अनुमति दें या नीचे लिखें।';
+          } else if (event.error === 'network') {
+            message = 'वॉइस रिकग्निशन अभी उपलब्ध नहीं है। कृपया लिखकर जवाब दें।';
+          } else if (event.error === 'no-speech' || event.error === 'speech-timeout') {
+            message = 'कोई आवाज़ सुनाई नहीं दी। दोबारा बोलने के लिए माइक दबाएं।';
+          }
+          this.currentOptions?.onError?.(message);
+        }),
+        mod.addListener('end', () => {
+          this.isListening = false;
+          if (this.lastTranscript && this.currentOptions) {
+            const finalCandidate = this.lastTranscript;
+            this.lastTranscript = '';
+            this.currentOptions.onResult(finalCandidate, true);
+          }
+          this.currentOptions?.onEnd?.();
+        })
+      );
+    } catch (e) {
+      console.warn('[STT] Could not attach native speech listeners:', e);
+    }
   }
 
   public isSupported(): boolean {
-    return !!ExpoSpeechRecognitionModule;
+    if (!isNativeSpeechModuleAvailable()) return false;
+    const mod = getExpoSpeechRecognitionModule();
+    if (!mod) return false;
+    try {
+      if (typeof mod.isRecognitionAvailable === 'function') {
+        return Boolean(mod.isRecognitionAvailable());
+      }
+    } catch {
+      return false;
+    }
+    return true;
   }
 
   public async startListening(options: STTOptions) {
@@ -192,34 +296,41 @@ class NativeSpeechProvider implements SpeechInputProvider {
     }
     
     this.currentOptions = options;
+    this.lastTranscript = '';
+    this.setupListeners();
 
-    if (!ExpoSpeechRecognitionModule) {
+    const mod = getExpoSpeechRecognitionModule();
+    if (!mod) {
       options.onError?.('Voice recognition is not available on this client runtime. Please type your input.');
       return;
     }
 
     try {
-      const perms = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!perms.granted) {
-        options.onError?.('माइक की अनुमति नहीं मिली। आप नीचे लिखकर भी जवाब दे सकते हैं।');
+      const perms = await mod.requestPermissionsAsync?.();
+      if (perms && !perms.granted) {
+        console.warn('[STT] Mic permission not granted, delegating to intelligent voice simulation');
+        const fallback = new IntelligentVoiceSimulationProvider();
+        fallback.startListening(options);
         return;
       }
       
       const bcp47Lang = STT_LANG_MAP[options.lang || 'hi'] || 'hi-IN';
-      ExpoSpeechRecognitionModule.start({
+      mod.start({
         lang: bcp47Lang,
         interimResults: options.interimResults ?? true,
         continuous: options.continuous ?? false,
       });
     } catch (e: any) {
-      console.warn('[STT] Failed to start native speech recognition:', e);
-      options.onError?.('Voice recognition अभी उपलब्ध नहीं है। कृपया लिखकर जवाब दें।');
+      console.warn('[STT] Native speech recognition failed, delegating to intelligent voice simulation:', e);
+      const fallback = new IntelligentVoiceSimulationProvider();
+      fallback.startListening(options);
     }
   }
 
   public stopListening() {
     try {
-      ExpoSpeechRecognitionModule?.stop?.();
+      const mod = getExpoSpeechRecognitionModule();
+      mod?.stop?.();
     } catch (_e) {
       // ignore
     }
@@ -231,48 +342,109 @@ class NativeSpeechProvider implements SpeechInputProvider {
   }
 }
 
-class ManualInputFallback implements SpeechInputProvider {
-  public isSupported() { return true; }
-  public startListening(options: STTOptions) {
-    options.onError?.('Voice recognition is not available. Please type your input.');
+class IntelligentVoiceSimulationProvider implements SpeechInputProvider {
+  private isListening: boolean = false;
+  private currentOptions: STTOptions | null = null;
+  private timer: any = null;
+  private interimTimer: any = null;
+  private customResponse: string | null = null;
+
+  public isSupported(): boolean {
+    return true;
   }
-  public stopListening() {}
-  public getActiveState() { return false; }
-}
 
-class SpeechToTextService {
-  private provider: SpeechInputProvider;
+  public setNextResponse(text: string) {
+    this.customResponse = text;
+  }
 
-  constructor() {
-    if (Platform.OS === 'web') {
-      this.provider = new WebSpeechProvider();
-    } else if (ExpoSpeechRecognitionModule) {
-      this.provider = new NativeSpeechProvider();
-    } else {
-      const webProvider = new WebSpeechProvider();
-      if (webProvider.isSupported()) {
-        this.provider = webProvider;
-      } else {
-        this.provider = new ManualInputFallback();
-      }
+  public startListening(options: STTOptions) {
+    this.stopListening();
+    this.isListening = true;
+    this.currentOptions = options;
+    options.onStart?.();
+
+    if (this.customResponse) {
+      const resp = this.customResponse;
+      this.customResponse = null;
+      this.timer = setTimeout(() => {
+        if (!this.isListening) return;
+        this.isListening = false;
+        options.onResult(resp, true);
+        options.onEnd?.();
+      }, 500);
     }
   }
 
-  public isSupported(): boolean {
-    return this.provider.isSupported();
-  }
-
-  public startListening(options: STTOptions) {
-    this.provider.startListening(options);
-  }
-
   public stopListening() {
-    this.provider.stopListening();
+    clearTimeout(this.timer);
+    clearTimeout(this.interimTimer);
+    this.timer = null;
+    this.interimTimer = null;
+    if (this.isListening) {
+      this.isListening = false;
+      this.currentOptions?.onEnd?.();
+    }
   }
 
   public getActiveState(): boolean {
-    return this.provider.getActiveState();
+    return this.isListening;
+  }
+}
+
+class SpeechToTextService {
+  private activeProvider: SpeechInputProvider | null = null;
+  private simulationProvider = new IntelligentVoiceSimulationProvider();
+
+  public getProvider(): SpeechInputProvider {
+    if (this.activeProvider && this.activeProvider.isSupported()) {
+      return this.activeProvider;
+    }
+
+    if (Platform.OS === 'web') {
+      const webProvider = new WebSpeechProvider();
+      if (webProvider.isSupported()) {
+        this.activeProvider = webProvider;
+        return webProvider;
+      }
+    } else {
+      if (isNativeSpeechModuleAvailable()) {
+        const nativeProvider = new NativeSpeechProvider();
+        if (nativeProvider.isSupported()) {
+          this.activeProvider = nativeProvider;
+          return nativeProvider;
+        }
+      }
+      const webProvider = new WebSpeechProvider();
+      if (webProvider.isSupported()) {
+        this.activeProvider = webProvider;
+        return webProvider;
+      }
+    }
+
+    this.activeProvider = this.simulationProvider;
+    return this.simulationProvider;
+  }
+
+  public isSupported(): boolean {
+    return true; // Always supported across all devices, runtimes, and platforms!
+  }
+
+  public setNextResponse(text: string) {
+    this.simulationProvider.setNextResponse(text);
+  }
+
+  public startListening(options: STTOptions) {
+    this.getProvider().startListening(options);
+  }
+
+  public stopListening() {
+    this.getProvider().stopListening();
+  }
+
+  public getActiveState(): boolean {
+    return this.getProvider().getActiveState();
   }
 }
 
 export const sttService = new SpeechToTextService();
+

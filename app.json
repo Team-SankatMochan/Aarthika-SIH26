@@ -18,7 +18,12 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.aarthika"
+      "package": "com.anonymous.aarthika",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "output": "static",
@@ -55,7 +60,8 @@
       "router": {},
       "eas": {
         "projectId": "98d4dca6-22b5-4acb-affc-a4cc62ff1c24"
-      }
+      },
+      "EXPO_PUBLIC_API_URL": "http://192.168.0.195:8000"
     }
   }
 }

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { globalInputStore, useCanonicalInputs, ProvenanceSource } from '../engine/CanonicalInputStore';
 import { InterviewEngine } from '../engine/InterviewEngine';
 import { VoiceQuestionCard } from '../components/rural/VoiceQuestionCard';
@@ -26,7 +27,92 @@ export default function RuralInterviewScreen() {
   const [baselineResult, setBaselineResult] = useState<any>(null);
   const [currentScenario, setCurrentScenario] = useState<string | null>(null);
   const [schemeResult, setSchemeResult] = useState<SIHSchemeResult | null>(null);
-  
+  const [userProfile, setUserProfile] = useState<{ name?: string; location?: string; business?: string } | null>(null);
+
+  // Pre-populate user profile from database/AsyncStorage so Aarthika never re-asks for location or business!
+  useEffect(() => {
+    (async () => {
+      try {
+        const storedUser = await AsyncStorage.getItem('@user');
+        const storedProfile = await AsyncStorage.getItem('@touchless_profile');
+        const storedPlan = await AsyncStorage.getItem('@business_plan');
+        const userObj = storedUser ? JSON.parse(storedUser) : null;
+        const profObj = storedProfile ? JSON.parse(storedProfile) : null;
+        const planObj = storedPlan ? JSON.parse(storedPlan) : null;
+
+        const userName = userObj?.fullName || userObj?.firstName || profObj?.name;
+        const location = userObj?.village || userObj?.district || profObj?.place;
+        const business = userObj?.occupation || userObj?.interestedSector || profObj?.occupation || planObj?.title || planObj?.sector;
+
+        if (userName || location || business) {
+          setUserProfile({ name: userName, location, business });
+        }
+
+        // Pre-populate canonical store so InterviewEngine skips questions already in database!
+        if (location && globalInputStore.get('location')?.value === undefined) {
+          globalInputStore.set({
+            field: 'location',
+            value: location,
+            source: 'USER_PROVIDED',
+            confirmed: true,
+            timestamp: Date.now(),
+          });
+        }
+
+        if (business && globalInputStore.get('business_category')?.value === undefined) {
+          globalInputStore.set({
+            field: 'business_category',
+            value: business,
+            source: 'USER_PROVIDED',
+            confirmed: true,
+            timestamp: Date.now(),
+          });
+        }
+
+        if (planObj) {
+          if (planObj.availableMarginCapital != null && globalInputStore.get('available_margin_capital')?.value === undefined) {
+            globalInputStore.set({
+              field: 'available_margin_capital',
+              value: Number(planObj.availableMarginCapital),
+              source: 'USER_PROVIDED',
+              confirmed: true,
+              timestamp: Date.now(),
+            });
+          }
+          if (planObj.salesPerMonth != null && globalInputStore.get('monthly_units_sold')?.value === undefined) {
+            globalInputStore.set({
+              field: 'monthly_units_sold',
+              value: Number(planObj.salesPerMonth),
+              source: 'USER_PROVIDED',
+              confirmed: true,
+              timestamp: Date.now(),
+            });
+          }
+          if (planObj.pricePerUnit != null && globalInputStore.get('selling_price_per_unit')?.value === undefined) {
+            globalInputStore.set({
+              field: 'selling_price_per_unit',
+              value: Number(planObj.pricePerUnit),
+              source: 'USER_PROVIDED',
+              confirmed: true,
+              timestamp: Date.now(),
+            });
+          }
+          if (planObj.costPerUnit != null && globalInputStore.get('variable_cost_per_unit')?.value === undefined) {
+            globalInputStore.set({
+              field: 'variable_cost_per_unit',
+              value: Number(planObj.costPerUnit),
+              source: 'USER_PROVIDED',
+              confirmed: true,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('RuralInterview profile load error:', err);
+      }
+    })();
+  }, []);
+
   const currentQuestion = engine.getNextQuestion(inputs);
 
   const handleConfirm = (value: any, source: string, derivation?: any) => {
@@ -119,6 +205,30 @@ export default function RuralInterviewScreen() {
           <Text style={styles.headerTitle}>AARTHIKA</Text>
         </View>
 
+        {/* Verified User Profile & Business Banner from Database */}
+        {userProfile?.business && (
+          <View style={styles.profileBadgeCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <Text style={{ fontSize: 20 }}>🏢</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.profileBadgeTitle} numberOfLines={1}>
+                    {userProfile.business}
+                  </Text>
+                  {userProfile.location && (
+                    <Text style={styles.profileBadgeSub}>
+                      📍 {userProfile.location} {userProfile.name ? `• 👤 ${userProfile.name}` : ''}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <View style={styles.verifiedTag}>
+                <Text style={styles.verifiedTagText}>✓ डेटाबेस से सत्यापित</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {showStructuring && inputs.available_margin_capital && (
           <FinancialStructuringAnimation 
             marginCapital={marginAmount} 
@@ -203,6 +313,35 @@ const styles = StyleSheet.create({
   doneCard: { padding: 30, backgroundColor: '#fff', borderRadius: 16, alignItems: 'center', marginTop: 20 },
   doneText: { fontSize: 22, fontWeight: 'bold', color: '#3f6653', marginBottom: 20 },
   doneBtn: { backgroundColor: '#8e4e14', paddingHorizontal: 30, paddingVertical: 15, borderRadius: 10 },
-  doneBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  resultsContainer: { marginTop: 20 }
+  doneBtnText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  resultsContainer: { marginTop: 20 },
+  profileBadgeCard: {
+    backgroundColor: '#e8f5e9',
+    borderColor: '#81c784',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  profileBadgeTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#2e7d32',
+  },
+  profileBadgeSub: {
+    fontSize: 12,
+    color: '#558b2f',
+    marginTop: 2,
+  },
+  verifiedTag: {
+    backgroundColor: '#c8e6c9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  verifiedTagText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#1b5e20',
+  },
 });

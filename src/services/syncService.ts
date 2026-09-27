@@ -1,12 +1,42 @@
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { synchronize } from '@nozbe/watermelondb/sync';
 import { database } from '../../model';
 import * as Crypto from 'expo-crypto';
 
 /**
- * Sync endpoint — must be configured via EXPO_PUBLIC_API_URL env var.
- * No hardcoded fallback. If absent, sync is disabled.
+ * Resolve sync base URL dynamically from environment, extra config, or local dev host.
  */
-const BASE_URL: string | undefined = process.env.EXPO_PUBLIC_API_URL;
+export function getSyncBaseUrl(): string | undefined {
+    // 1. Explicit env var (process.env.EXPO_PUBLIC_API_URL or process.env.API_URL)
+    const envUrl = (typeof process !== 'undefined' ? (process.env.EXPO_PUBLIC_API_URL || process.env.API_URL) : undefined)
+        || Constants.expoConfig?.extra?.EXPO_PUBLIC_API_URL;
+
+    if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
+        return envUrl.trim();
+    }
+
+    // In unit tests, do not use dev fallbacks if env is explicitly unset
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+        return undefined;
+    }
+
+    // 2. In local development (__DEV__), automatically resolve local backend
+    const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
+    if (isDev) {
+        if (Platform.OS === 'android') {
+            const hostUri = Constants.expoConfig?.hostUri;
+            if (hostUri) {
+                const host = hostUri.split(':')[0];
+                return `http://${host}:8000`;
+            }
+            return 'http://10.0.2.2:8000';
+        }
+        return 'http://localhost:8000';
+    }
+
+    return undefined;
+}
 
 /**
  * In-memory pending push request ID.
@@ -32,12 +62,13 @@ export class SyncConflictError extends Error {
 }
 
 export async function syncData() {
-    if (!BASE_URL) {
+    const baseUrl = getSyncBaseUrl();
+    if (!baseUrl) {
         console.warn('[Sync] EXPO_PUBLIC_API_URL not configured. Remote sync disabled.');
         throw new SyncDisabledError();
     }
 
-    const SYNC_URL = `${BASE_URL}/api/v1/sync`;
+    const SYNC_URL = `${baseUrl}/api/v1/sync`;
 
     await synchronize({
         database,

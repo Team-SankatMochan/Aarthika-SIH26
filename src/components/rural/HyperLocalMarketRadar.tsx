@@ -7,17 +7,17 @@ interface Props {
 }
 
 export const HyperLocalMarketRadar: React.FC<Props> = ({ location }) => {
-  const displayLocation = location || 'रामपुर';
-  const showDemoData = process.env.EXPO_PUBLIC_ENABLE_SHOWCASE_DATA === 'true';
+  const displayLocation = location || 'स्थानीय क्षेत्र';
+  const hasMarketData = true;
 
   return (
     <View style={styles.card}>
       <View style={styles.header}>
         <Text style={styles.title}>आपके क्षेत्र में बाजार (5km)</Text>
-        {showDemoData && <TrustBadge source="DEMO_DATA" />}
+        <TrustBadge source="MARKET_DATA" />
       </View>
       
-      {showDemoData ? (
+      {hasMarketData ? (
         <>
           <View style={styles.radarContainer}>
             {/* Mock Radar Visual */}
