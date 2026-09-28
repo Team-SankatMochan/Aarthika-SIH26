@@ -226,6 +226,9 @@ class NativeSpeechProvider implements SpeechInputProvider {
   private lastTranscript: string = '';
   private initializedListeners: boolean = false;
   private hasDeliveredFinal: boolean = false;
+  private startSequence: number = 0;
+  private startIssued: boolean = false;
+  private cancelRequested: boolean = false;
 
   constructor() {
     if (isNativeSpeechModuleAvailable()) {
@@ -263,6 +266,7 @@ class NativeSpeechProvider implements SpeechInputProvider {
           }
         }),
         mod.addListener('error', (event: any) => {
+          if (this.cancelRequested || event.error === 'aborted') return;
           this.isListening = false;
           console.warn('[STT] Native Recognition error:', event.error, event.message);
           let message = 'माइक की अनुमति नहीं मिली या कोई तकनीकी समस्या है। आप नीचे लिखकर भी जवाब दे सकते हैं।';
@@ -279,13 +283,16 @@ class NativeSpeechProvider implements SpeechInputProvider {
         }),
         mod.addListener('end', () => {
           this.isListening = false;
-          if (this.lastTranscript && this.currentOptions && !this.hasDeliveredFinal) {
+          if (!this.cancelRequested && this.lastTranscript && this.currentOptions && !this.hasDeliveredFinal) {
             this.hasDeliveredFinal = true;
             const finalCandidate = this.lastTranscript;
             this.lastTranscript = '';
             this.currentOptions.onResult(finalCandidate, true);
           }
           this.currentOptions?.onEnd?.();
+          this.currentOptions = null;
+          this.startIssued = false;
+          this.cancelRequested = false;
         })
       );
     } catch (e) {
@@ -310,16 +317,15 @@ class NativeSpeechProvider implements SpeechInputProvider {
   private isStarting = false;
 
   public async startListening(options: STTOptions) {
-    if (this.isStarting) return;
+    if (this.isStarting || this.startIssued) {
+      options.onError?.('The microphone is still closing. Please tap again in a moment.');
+      return;
+    }
     this.isStarting = true;
+    const sequence = ++this.startSequence;
+    this.cancelRequested = false;
 
     try {
-      if (this.isListening) {
-        this.stopListening();
-        // Give native recognizer a tiny bit of time to tear down to avoid overlapping start/stop ERROR_CLIENT
-        await new Promise(resolve => setTimeout(resolve, 150));
-      }
-      
       this.currentOptions = options;
       this.lastTranscript = '';
       this.hasDeliveredFinal = false;
@@ -348,6 +354,7 @@ class NativeSpeechProvider implements SpeechInputProvider {
       }
 
       const perms = await mod.requestPermissionsAsync?.();
+      if (sequence !== this.startSequence) return;
       if (perms && !perms.granted) {
         this.isListening = false;
         options.onError?.(
@@ -359,6 +366,7 @@ class NativeSpeechProvider implements SpeechInputProvider {
       }
 
       const bcp47Lang = STT_LANG_MAP[options.lang || 'hi'] || 'hi-IN';
+      this.startIssued = true;
       mod.start({
         lang: bcp47Lang,
         interimResults: options.interimResults ?? true,
@@ -369,6 +377,7 @@ class NativeSpeechProvider implements SpeechInputProvider {
         },
       });
     } catch (e: any) {
+      this.startIssued = false;
       this.isListening = false;
       console.warn('[STT] Native speech recognition failed:', e);
       options.onError?.(
@@ -382,17 +391,23 @@ class NativeSpeechProvider implements SpeechInputProvider {
   }
 
   public stopListening() {
+    if (this.cancelRequested || (!this.isStarting && !this.startIssued && !this.isListening)) return;
+    ++this.startSequence;
+    this.cancelRequested = true;
+    this.currentOptions = null;
     try {
-      const mod = getExpoSpeechRecognitionModule();
-      mod?.stop?.();
+      if (this.startIssued) {
+        const mod = getExpoSpeechRecognitionModule();
+        mod?.abort?.();
+      }
     } catch (_e) {
-      // ignore
+      this.startIssued = false;
     }
     this.isListening = false;
   }
 
   public getActiveState(): boolean {
-    return this.isListening;
+    return this.isListening || this.isStarting || this.startIssued;
   }
 }
 
@@ -492,13 +507,7 @@ class SpeechToTextService {
   }
 
   public isSupported(): boolean {
-    if (Platform.OS === 'web') {
-      return new WebSpeechProvider().isSupported();
-    }
-    if (isNativeSpeechModuleAvailable()) {
-      return new NativeSpeechProvider().isSupported();
-    }
-    return new WebSpeechProvider().isSupported();
+    return this.getProvider().isSupported();
   }
 
   public setNextResponse(text: string) {
@@ -511,7 +520,7 @@ class SpeechToTextService {
   }
 
   public stopListening() {
-    this.getProvider().stopListening();
+    this.activeProvider?.stopListening();
   }
 
   public getActiveState(): boolean {

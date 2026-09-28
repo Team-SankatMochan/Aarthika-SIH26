@@ -30,6 +30,7 @@ export interface SpeakOptions {
 }
 
 let activeSafetyTimer: any = null;
+let speechSequence = 0;
 
 /** Speak a phrase out loud with completion callback. Safe no-op when speech is unavailable. */
 export function speak(
@@ -46,6 +47,8 @@ export function speak(
     }
     return;
   }
+
+  const sequence = ++speechSequence;
 
   // Clear any existing fallback timer
   if (activeSafetyTimer) {
@@ -69,6 +72,7 @@ export function speak(
 
   let finished = false;
   const finishOnce = () => {
+    if (sequence !== speechSequence) return;
     if (activeSafetyTimer) {
       clearTimeout(activeSafetyTimer);
       activeSafetyTimer = null;
@@ -79,38 +83,44 @@ export function speak(
     }
   };
 
-  // Safety fallback timer so UI never hangs if an OS TTS engine does not fire onDone
-  const estimatedMs = Math.max(2200, Math.min(12000, text.length * 90));
-  activeSafetyTimer = setTimeout(() => {
-    finishOnce();
-  }, estimatedMs);
-
-  try {
-    Speech.stop();
-    Speech.speak(text, {
-      language: VOICE_LANG[lang] || VOICE_LANG.en,
-      rate,
-      pitch: 1,
-      onDone: () => {
-        finishOnce();
-      },
-      onError: (err) => {
-        console.warn('[tts] speak error event:', err);
-        onError?.(err);
-        finishOnce();
-      },
-      onStopped: () => {
-        if (activeSafetyTimer) {
-          clearTimeout(activeSafetyTimer);
-          activeSafetyTimer = null;
-        }
-        onStopped?.();
-      },
-    });
-  } catch (e) {
-    console.warn('[tts] speak failed:', e);
-    finishOnce();
-  }
+  // expo-speech.stop() is asynchronous. Starting the next utterance before it
+  // settles can cancel the new prompt on Android.
+  void (async () => {
+    try {
+      await Speech.stop();
+      if (sequence !== speechSequence) return;
+      Speech.speak(text, {
+        language: VOICE_LANG[lang] || VOICE_LANG.en,
+        rate,
+        pitch: 1,
+        onDone: finishOnce,
+        onError: (err) => {
+          if (sequence !== speechSequence) return;
+          console.warn('[tts] speak error event:', err);
+          onError?.(err);
+          finishOnce();
+        },
+        onStopped: () => {
+          if (sequence !== speechSequence) return;
+          if (activeSafetyTimer) {
+            clearTimeout(activeSafetyTimer);
+            activeSafetyTimer = null;
+          }
+          onStopped?.();
+        },
+      });
+      // Safety fallback if the device TTS engine does not send onDone.
+      if (!finished) {
+        const estimatedMs = Math.max(2200, Math.min(12000, text.length * 90));
+        activeSafetyTimer = setTimeout(finishOnce, estimatedMs);
+      }
+    } catch (err) {
+      if (sequence !== speechSequence) return;
+      console.warn('[tts] speak failed:', err);
+      onError?.(err);
+      finishOnce();
+    }
+  })();
 }
 
 /** Check if speech is currently active */
@@ -123,15 +133,17 @@ export async function isSpeaking(): Promise<boolean> {
 }
 
 /** Interrupt any in-flight speech. */
-export function stopSpeaking() {
+export function stopSpeaking(): Promise<void> {
+  ++speechSequence;
   if (activeSafetyTimer) {
     clearTimeout(activeSafetyTimer);
     activeSafetyTimer = null;
   }
   try {
-    Speech.stop();
+    return Speech.stop().catch((e) => console.warn('[tts] stop failed:', e));
   } catch (e) {
     console.warn('[tts] stop failed:', e);
+    return Promise.resolve();
   }
 }
 
