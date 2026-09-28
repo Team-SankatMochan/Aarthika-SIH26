@@ -51,7 +51,13 @@
           }
         }
       ],
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      [
+        "@morrowdigital/watermelondb-expo-plugin",
+        {
+          "disableJsi": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

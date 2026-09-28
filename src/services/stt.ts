@@ -272,6 +272,8 @@ class NativeSpeechProvider implements SpeechInputProvider {
             message = 'वॉइस रिकग्निशन अभी उपलब्ध नहीं है। कृपया लिखकर जवाब दें।';
           } else if (event.error === 'no-speech' || event.error === 'speech-timeout') {
             message = 'कोई आवाज़ सुनाई नहीं दी। दोबारा बोलने के लिए माइक दबाएं।';
+          } else if (event.error === 'client') {
+            message = 'डिवाइस में माइक/STT की समस्या है। एम्यूलेटर या Google App की माइक सेटिंग्स जांचें।';
           }
           this.currentOptions?.onError?.(message);
         }),
@@ -305,23 +307,46 @@ class NativeSpeechProvider implements SpeechInputProvider {
     return true;
   }
 
-  public async startListening(options: STTOptions) {
-    if (this.isListening) {
-      this.stopListening();
-    }
-    
-    this.currentOptions = options;
-    this.lastTranscript = '';
-    this.hasDeliveredFinal = false;
-    this.setupListeners();
+  private isStarting = false;
 
-    const mod = getExpoSpeechRecognitionModule();
-    if (!mod) {
-      options.onError?.('Voice recognition is not available on this client runtime. Please type your input.');
-      return;
-    }
+  public async startListening(options: STTOptions) {
+    if (this.isStarting) return;
+    this.isStarting = true;
 
     try {
+      if (this.isListening) {
+        this.stopListening();
+        // Give native recognizer a tiny bit of time to tear down to avoid overlapping start/stop ERROR_CLIENT
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+      
+      this.currentOptions = options;
+      this.lastTranscript = '';
+      this.hasDeliveredFinal = false;
+      this.setupListeners();
+
+      const mod = getExpoSpeechRecognitionModule();
+      if (!mod) {
+        options.onError?.('Voice recognition is not available on this client runtime. Please type your input.');
+        return;
+      }
+
+      if (typeof mod.getSpeechRecognitionServices === 'function') {
+        try {
+          const services = mod.getSpeechRecognitionServices();
+          if (!services || services.length === 0) {
+            options.onError?.(
+              options.lang === 'hi' 
+                ? 'इस डिवाइस पर कोई वॉइस रिकग्निशन सर्विस इंस्टॉल नहीं है (जैसे Google App)। कृपया लिखकर जवाब दें।' 
+                : 'No speech recognition service found on this device (e.g., Google App is missing). Please type below.'
+            );
+            return;
+          }
+        } catch (e) {
+          console.warn('Error checking services', e);
+        }
+      }
+
       const perms = await mod.requestPermissionsAsync?.();
       if (perms && !perms.granted) {
         this.isListening = false;
@@ -338,6 +363,10 @@ class NativeSpeechProvider implements SpeechInputProvider {
         lang: bcp47Lang,
         interimResults: options.interimResults ?? true,
         continuous: options.continuous ?? false,
+        requiresOnDeviceRecognition: false,
+        androidIntentOptions: {
+          EXTRA_LANGUAGE_MODEL: 'web_search',
+        },
       });
     } catch (e: any) {
       this.isListening = false;
@@ -347,6 +376,8 @@ class NativeSpeechProvider implements SpeechInputProvider {
           ? 'वॉइस रिकग्निशन शुरू करने में समस्या आई। कृपया नीचे लिखकर जवाब दें।'
           : 'Failed to start voice recognition. Please type below.'
       );
+    } finally {
+      this.isStarting = false;
     }
   }
 

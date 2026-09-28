@@ -84,7 +84,7 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
         setSpokenText(transcript);
         const parsed = parseSpokenNumber(transcript);
         setParsedResult(parsed);
-        if (parsed.success) {
+        if (parsed.success && parsed.value !== null) {
           setManualInput(parsed.value.toString());
         }
         if (isFinal) {
@@ -123,7 +123,7 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
 
 
   const handleApply = () => {
-    if (parsedResult && parsedResult.success && parsedResult.value >= 0) {
+    if (parsedResult && parsedResult.success && parsedResult.value !== null && parsedResult.value >= 0) {
       onApplyValue(parsedResult.value);
       onClose();
     } else if (manualInput.trim()) {
@@ -212,7 +212,7 @@ export const NumericVoiceModal: React.FC<NumericVoiceModalProps> = ({
               {parsedResult && parsedResult.success ? (
                 <View style={styles.successValueBadge}>
                   <Text style={styles.successLabel}>
-                    {t('interpreted_number') || 'Interpreted Value: ₹'}{parsedResult.value.toLocaleString('en-IN')}
+                    {t('interpreted_number') || 'Interpreted Value: ₹'}{parsedResult.value !== null ? parsedResult.value.toLocaleString('en-IN') : '0'}
                   </Text>
                 </View>
               ) : (

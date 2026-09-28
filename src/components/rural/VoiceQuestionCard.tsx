@@ -133,7 +133,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
 
     if (isNumeric) {
       const parsed = parseSpokenNumber(text);
-      if (parsed.success) {
+      if (parsed.success && parsed.value !== null) {
         setInputValue(parsed.value.toString());
         setParseError('');
         const confirmText = question.confirmation_hi.replace('{{value}}', parsed.formatted);
@@ -154,7 +154,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
     startListeningBase((text) => {
       setTranscript(text);
       const parsed = parseSpokenNumber(text);
-      if (parsed.success) {
+      if (parsed.success && parsed.value !== null) {
         const val = parsed.value;
         setDerivationAnswers(prev => {
           const next = { ...prev, [stepId]: val };

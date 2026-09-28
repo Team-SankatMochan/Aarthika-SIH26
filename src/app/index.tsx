@@ -2130,7 +2130,7 @@ function TouchlessAuthScreen() {
     } else if (stepIndex === 3) {
       // Age cleaning using numberParser
       const parsed = parseSpokenNumber(text);
-      if (parsed.success && parsed.value > 0) {
+      if (parsed.success && parsed.value !== null && parsed.value > 0) {
         return Math.min(100, Math.max(14, Math.round(parsed.value))).toString();
       }
       const digits = text.match(/\d{1,3}/);
