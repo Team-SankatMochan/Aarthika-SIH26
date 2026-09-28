@@ -1968,6 +1968,7 @@ function TouchlessAuthScreen() {
   // Refs for speech timers
   const speechTimerRef = useRef<any>(null);
   const finishTimerRef = useRef<any>(null);
+  const promptSequenceRef = useRef(0);
 
   // Check for previous profile in AsyncStorage on mount
   useEffect(() => {
@@ -2147,33 +2148,24 @@ function TouchlessAuthScreen() {
     const cleaned = cleanSpokenInput(step, rawText);
     if (!cleaned) return;
 
-    try {
-      sttService.stopListening();
-    } catch (_e) {
-      // ignore
-    }
     setIsListening(false);
 
     if (step === 0) {
       setName(cleaned);
       const ack = currentLang === 'hi' ? `नमस्ते ${cleaned} जी!` : `Hello ${cleaned}!`;
-      speak(ack, currentLang);
-      setTimeout(() => setStep(1), 1200);
+      speak(ack, currentLang, { onDone: () => setStep(prev => prev === 0 ? 1 : prev) });
     } else if (step === 1) {
       setPlace(cleaned);
       const ack = currentLang === 'hi' ? `${cleaned}, बहुत बढ़िया!` : `Great, from ${cleaned}!`;
-      speak(ack, currentLang);
-      setTimeout(() => setStep(2), 1200);
+      speak(ack, currentLang, { onDone: () => setStep(prev => prev === 1 ? 2 : prev) });
     } else if (step === 2) {
       setOccupation(cleaned);
       const ack = currentLang === 'hi' ? 'शानदार कार्य!' : 'Great occupation!';
-      speak(ack, currentLang);
-      setTimeout(() => setStep(3), 1200);
+      speak(ack, currentLang, { onDone: () => setStep(prev => prev === 2 ? 3 : prev) });
     } else if (step === 3) {
       setAge(cleaned);
       const ack = currentLang === 'hi' ? 'धन्यवाद! आपकी प्रोफ़ाइल तैयार है।' : 'Thank you! Your profile is ready.';
-      speak(ack, currentLang);
-      setTimeout(() => setStep(4), 1200);
+      speak(ack, currentLang, { onDone: () => setStep(prev => prev === 3 ? 4 : prev) });
     }
   };
 
@@ -2188,10 +2180,11 @@ function TouchlessAuthScreen() {
   }, []);
 
   // Start speech recognition for current step
-  const startListening = useCallback(() => {
-    stopSpeaking();
+  const startListening = useCallback(async () => {
+    await stopSpeaking();
     setError('');
     setLiveTranscript('');
+    let finalTranscript = '';
     try {
       sttService.startListening({
         lang: currentLang,
@@ -2206,7 +2199,7 @@ function TouchlessAuthScreen() {
             questions[step]?.setValue(transcript);
           }
           if (isFinal && transcript.trim().length > 0) {
-            handleSpeechReceived(transcript.trim());
+            finalTranscript = transcript.trim();
           }
         },
         onError: (err) => {
@@ -2217,6 +2210,7 @@ function TouchlessAuthScreen() {
         },
         onEnd: () => {
           setIsListening(false);
+          if (finalTranscript) handleSpeechReceived(finalTranscript);
         },
       });
     } catch (e) {
@@ -2225,9 +2219,12 @@ function TouchlessAuthScreen() {
     }
   }, [currentLang, step]);
 
-  // Play question audio prompt and then auto-listen touchlessly
+  const spokenPrompt = questions[step]?.spoken;
+
+  // Listen only after the spoken prompt has finished and released the audio route.
   const playPromptAndListen = useCallback((stepIdx: number) => {
     if (stepIdx > 3) return;
+    const sequence = ++promptSequenceRef.current;
     clearTimeout(speechTimerRef.current);
     try {
       sttService.stopListening();
@@ -2236,17 +2233,17 @@ function TouchlessAuthScreen() {
     }
     setIsListening(false);
 
-    const q = questions[stepIdx];
-    if (!q) return;
+    if (!spokenPrompt) return;
 
-    // Speak prompt aloud
-    speak(q.spoken, currentLang, 0.95);
-
-    // Wait for speech to complete (~1.5s), then automatically listen
-    speechTimerRef.current = setTimeout(() => {
-      startListening();
-    }, 1500);
-  }, [currentLang, questions, startListening]);
+    const listenAfterPrompt = () => {
+      if (sequence !== promptSequenceRef.current) return;
+      clearTimeout(speechTimerRef.current);
+      speechTimerRef.current = setTimeout(() => {
+        if (sequence === promptSequenceRef.current) void startListening();
+      }, 250);
+    };
+    speak(spokenPrompt, currentLang, { onDone: listenAfterPrompt });
+  }, [currentLang, spokenPrompt, startListening]);
 
   // Trigger prompt when step changes
   useEffect(() => {
@@ -2257,6 +2254,7 @@ function TouchlessAuthScreen() {
       }, 50);
     }
     return () => {
+      ++promptSequenceRef.current;
       clearTimeout(tId);
       clearTimeout(speechTimerRef.current);
       stopSpeaking();
@@ -2317,12 +2315,9 @@ function TouchlessAuthScreen() {
         const welcomePhrase = currentLang === 'hi'
           ? `स्वागत है ${finalName} जी! आपका आर्थिक खाता तैयार है।`
           : `Welcome ${finalName}! Your Aarthika profile is ready.`;
-        speak(welcomePhrase, currentLang);
-
-        // Auto-save and navigate after 2 seconds
-        finishTimerRef.current = setTimeout(() => {
-          handleFinalSubmit();
-        }, 2000);
+        speak(welcomePhrase, currentLang, {
+          onDone: () => { void handleFinalSubmit(); },
+        });
       }, 50);
     }
     return () => {
@@ -2764,6 +2759,7 @@ function VoiceModal({ isOpen, onClose, t, currentLang, onTranscript }: any) {
   const [isListening, setIsListening] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const spokenRef = useRef(false);
+  const voiceSequenceRef = useRef(0);
   const [pulseAnim] = useState(() => new Animated.Value(1));
 
   // Pulse animation for mic listening state
@@ -2788,7 +2784,10 @@ function VoiceModal({ isOpen, onClose, t, currentLang, onTranscript }: any) {
     }
   }, [isListening]);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
+    const sequence = voiceSequenceRef.current;
+    await stopSpeaking();
+    if (sequence !== voiceSequenceRef.current) return;
     setVoiceError(null);
     setIsListening(true);
     sttService.startListening({
@@ -2814,28 +2813,38 @@ function VoiceModal({ isOpen, onClose, t, currentLang, onTranscript }: any) {
     });
   }, [currentLang]);
 
-  // Start listening and speak TTS prompt on open
+  const promptText = t('home_question') || 'What business do you want to start or grow?';
+
+  // Start the microphone only when the prompt is done.
   useEffect(() => {
     if (isOpen) {
+      const sequence = ++voiceSequenceRef.current;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTranscript('');
       setVoiceError(null);
       if (!spokenRef.current) {
         spokenRef.current = true;
-        const prompt = t('home_question') || 'What business do you want to start or grow?';
-        speak(prompt, currentLang);
+        speak(promptText, currentLang, {
+          onDone: () => {
+            if (sequence === voiceSequenceRef.current) void startListening();
+          },
+        });
+      } else {
+        void startListening();
       }
-      startListening();
     } else {
+      ++voiceSequenceRef.current;
       spokenRef.current = false;
       stopSpeaking();
       sttService.stopListening();
       setIsListening(false);
     }
     return () => {
+      ++voiceSequenceRef.current;
+      stopSpeaking();
       sttService.stopListening();
     };
-  }, [isOpen, currentLang]);
+  }, [isOpen, currentLang, promptText, startListening]);
 
 
   const handleSubmit = () => {
@@ -2860,7 +2869,7 @@ function VoiceModal({ isOpen, onClose, t, currentLang, onTranscript }: any) {
             ]}
           >
             <TouchableOpacity
-              onPress={isListening ? () => sttService.stopListening() : startListening}
+              onPress={isListening ? () => { sttService.stopListening(); setIsListening(false); } : () => { void startListening(); }}
               activeOpacity={0.8}
             >
               <Text style={{ fontSize: 36 }}>🎙️</Text>

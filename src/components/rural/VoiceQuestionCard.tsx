@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
 import { QuestionConfig } from '../../engine/InterviewEngine';
 import { sttService } from '../../services/stt';
@@ -17,6 +17,8 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
   const [inputValue, setInputValue] = useState<string>('');
   const [uiState, setUiState] = useState<UIState>('IDLE');
   const [parseError, setParseError] = useState('');
+  const promptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listenSequenceRef = useRef(0);
 
   // Derivation state
   const [inDerivationMode, setInDerivationMode] = useState(false);
@@ -29,14 +31,19 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
   useEffect(() => {
     // Speak question on mount
     let isMounted = true;
-    setTimeout(() => {
+    promptTimerRef.current = setTimeout(() => {
       if (isMounted) {
         speak(question.prompt_hi, 'hi');
       }
     }, 500);
     return () => {
       isMounted = false;
+      // Invalidate an in-flight microphone start when the question unmounts.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++listenSequenceRef.current;
+      if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
       stopSpeaking();
+      sttService.stopListening();
     };
   }, [question.id, question.prompt_hi]);
 
@@ -64,7 +71,7 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
     return false;
   };
 
-  const startListeningBase = (onResultText: (text: string) => void) => {
+  const startListeningBase = async (onResultText: (text: string) => void) => {
     if (sttService.getActiveState()) {
       sttService.stopListening();
       setUiState('IDLE');
@@ -78,8 +85,14 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
       return;
     }
 
+    const sequence = ++listenSequenceRef.current;
+    if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
+    await stopSpeaking();
+    if (sequence !== listenSequenceRef.current) return;
+
     setParseError('');
     setUiState('LISTENING');
+    let finalText = '';
     sttService.startListening({
       lang: 'hi',
       onStart: () => setUiState('LISTENING'),
@@ -87,12 +100,16 @@ export const VoiceQuestionCard: React.FC<Props> = ({ question, onConfirm }) => {
         if (!isFinal) {
           setUiState('TRANSCRIBING');
         } else {
-          setUiState('RESULT');
-          onResultText(text);
+          finalText = text;
         }
       },
       onEnd: () => {
-        setUiState(prev => prev !== 'RESULT' ? 'IDLE' : 'RESULT');
+        if (finalText) {
+          setUiState('RESULT');
+          onResultText(finalText);
+        } else {
+          setUiState('IDLE');
+        }
       },
       onError: (err) => {
         setUiState('IDLE');
