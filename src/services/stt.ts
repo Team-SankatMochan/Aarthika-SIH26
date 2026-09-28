@@ -6,69 +6,23 @@
 import { Platform } from 'react-native';
 
 let ExpoSpeechRecognitionModule: any = null;
-let hasCheckedNativeModule = false;
 
 export function isNativeSpeechModuleAvailable(): boolean {
-  if (Platform.OS === 'web') return false;
-  try {
-    // 1. Check globalThis.expo.modules (JSI native modules in Expo)
-    const expoGlobal = (globalThis as any)?.expo;
-    if (expoGlobal?.modules?.ExpoSpeechRecognition) {
-      return true;
-    }
-
-    // 2. Check requireOptionalNativeModule from expo or expo-modules-core
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const expo = require('expo');
-      if (typeof expo?.requireOptionalNativeModule === 'function') {
-        const mod = expo.requireOptionalNativeModule('ExpoSpeechRecognition');
-        if (mod) return true;
-      }
-    } catch (_e) {
-      // ignore
-    }
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const expoCore = require('expo-modules-core');
-      if (typeof expoCore?.requireOptionalNativeModule === 'function') {
-        const mod = expoCore.requireOptionalNativeModule('ExpoSpeechRecognition');
-        if (mod) return true;
-      }
-    } catch (_e) {
-      // ignore
-    }
-
-    // 3. Check NativeModules from react-native
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { NativeModules } = require('react-native');
-    if (NativeModules?.ExpoSpeechRecognition || NativeModules?.NativeModulesProxy?.ExpoSpeechRecognition) {
-      return true;
-    }
-  } catch (_e) {
-    return false;
-  }
-  return false;
+  return Platform.OS !== 'web' && getExpoSpeechRecognitionModule() !== null;
 }
 
 export function getExpoSpeechRecognitionModule(): any {
-  if (hasCheckedNativeModule) return ExpoSpeechRecognitionModule;
-  hasCheckedNativeModule = true;
-
-  if (!isNativeSpeechModuleAvailable()) {
-    ExpoSpeechRecognitionModule = null;
-    return null;
-  }
+  if (Platform.OS === 'web') return null;
+  if (ExpoSpeechRecognitionModule) return ExpoSpeechRecognitionModule;
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const speechPkg = require('expo-speech-recognition');
-    ExpoSpeechRecognitionModule =
-      speechPkg?.ExpoSpeechRecognitionModule ??
-      speechPkg?.default?.ExpoSpeechRecognitionModule ??
-      null;
-  } catch (_e) {
+    // The package imports requireNativeModule at module scope and throws in
+    // Expo Go or an older binary. Query Expo's registry without importing it.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const expo = require('expo');
+    ExpoSpeechRecognitionModule = expo.requireOptionalNativeModule('ExpoSpeechRecognition');
+  } catch {
+    // Retry after a runtime reload instead of caching an unavailable module.
     ExpoSpeechRecognitionModule = null;
   }
   return ExpoSpeechRecognitionModule;
@@ -230,12 +184,6 @@ class NativeSpeechProvider implements SpeechInputProvider {
   private startIssued: boolean = false;
   private cancelRequested: boolean = false;
 
-  constructor() {
-    if (isNativeSpeechModuleAvailable()) {
-      this.setupListeners();
-    }
-  }
-
   private setupListeners() {
     if (!isNativeSpeechModuleAvailable()) return;
     const mod = getExpoSpeechRecognitionModule();
@@ -244,6 +192,10 @@ class NativeSpeechProvider implements SpeechInputProvider {
     try {
       this.listeners.push(
         mod.addListener('start', () => {
+          if (this.cancelRequested) {
+            mod.abort?.();
+            return;
+          }
           this.isListening = true;
           this.currentOptions?.onStart?.();
         }),
@@ -333,24 +285,27 @@ class NativeSpeechProvider implements SpeechInputProvider {
 
       const mod = getExpoSpeechRecognitionModule();
       if (!mod) {
-        options.onError?.('Voice recognition is not available on this client runtime. Please type your input.');
+        options.onError?.('Voice recognition needs an app build that includes expo-speech-recognition. Expo Go cannot use this microphone feature.');
         return;
       }
 
-      if (typeof mod.getSpeechRecognitionServices === 'function') {
+      if (typeof mod.isRecognitionAvailable === 'function' && !mod.isRecognitionAvailable()) {
+        let services: string[] = [];
         try {
-          const services = mod.getSpeechRecognitionServices();
-          if (!services || services.length === 0) {
-            options.onError?.(
-              options.lang === 'hi' 
-                ? 'इस डिवाइस पर कोई वॉइस रिकग्निशन सर्विस इंस्टॉल नहीं है (जैसे Google App)। कृपया लिखकर जवाब दें।' 
-                : 'No speech recognition service found on this device (e.g., Google App is missing). Please type below.'
-            );
-            return;
+          if (Platform.OS === 'android' && typeof mod.getSpeechRecognitionServices === 'function') {
+            services = mod.getSpeechRecognitionServices();
           }
-        } catch (e) {
-          console.warn('Error checking services', e);
+        } catch {
+          // Service listing is diagnostic only; Android package visibility can
+          // hide providers even when the recognizer itself works.
         }
+        console.warn('[STT] Recognition unavailable; Android services:', services);
+        options.onError?.(
+          options.lang === 'hi'
+            ? 'इस डिवाइस पर वॉइस रिकग्निशन सेवा उपलब्ध नहीं है। सिस्टम सेटिंग्स में Speech Recognition & Synthesis या Google ऐप चालू करें।'
+            : 'No speech recognition service is available. Enable Speech Recognition & Synthesis or the Google app in device settings.'
+        );
+        return;
       }
 
       const perms = await mod.requestPermissionsAsync?.();
@@ -467,7 +422,7 @@ class SpeechToTextService {
   private simulationProvider = new IntelligentVoiceSimulationProvider();
 
   public getProvider(): SpeechInputProvider {
-    if (this.activeProvider && this.activeProvider.isSupported()) {
+    if (this.activeProvider) {
       return this.activeProvider;
     }
 
@@ -478,12 +433,10 @@ class SpeechToTextService {
         return webProvider;
       }
     } else {
-      if (isNativeSpeechModuleAvailable()) {
+      if (getExpoSpeechRecognitionModule()) {
         const nativeProvider = new NativeSpeechProvider();
-        if (nativeProvider.isSupported()) {
-          this.activeProvider = nativeProvider;
-          return nativeProvider;
-        }
+        this.activeProvider = nativeProvider;
+        return nativeProvider;
       }
       const webProvider = new WebSpeechProvider();
       if (webProvider.isSupported()) {
@@ -498,7 +451,9 @@ class SpeechToTextService {
         options.onError?.(
           options.lang === 'hi'
             ? 'वॉइस रिकग्निशन इस डिवाइस/ब्राउज़र पर उपलब्ध नहीं है। कृपया नीचे लिखकर जवाब दें।'
-            : 'Voice recognition is not available on this device/browser. Please type your input below.'
+            : Platform.OS === 'web'
+              ? 'Voice recognition is not available in this browser. Please type your input below.'
+              : 'Voice recognition requires an app build with expo-speech-recognition. Expo Go cannot use this microphone feature.'
         );
       },
       stopListening: () => {},

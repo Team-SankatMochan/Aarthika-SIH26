@@ -51,7 +51,15 @@
           }
         }
       ],
-      "expo-speech-recognition",
+      [
+        "expo-speech-recognition",
+        {
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.tts"
+          ]
+        }
+      ],
       [
         "@morrowdigital/watermelondb-expo-plugin",
         {
